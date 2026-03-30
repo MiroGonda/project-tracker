@@ -25,26 +25,44 @@ function rtClient() {
   })
 }
 
+/**
+ * Returns boards normalised to { id, name, activeCards, doneCards, totalCards }.
+ * API returns { boardId, projectName, activeCards, doneCards, totalCards }.
+ */
 export const listBoards = () =>
-  aresClient().get('/boards').then(r => {
-    const data = r.data?.data
-    return (data?.boards ?? data) || []
-  })
+  aresClient().get('/boards').then(r =>
+    (r.data?.data || []).map(b => ({
+      id:          b.boardId,
+      name:        b.projectName,
+      activeCards: b.activeCards,
+      doneCards:   b.doneCards,
+      totalCards:  b.totalCards,
+    }))
+  )
 
 export const boardSummary = (boardId) =>
   aresClient().get(`/boards/${boardId}/summary`).then(r => r.data?.data)
 
+/**
+ * Cards for a board.
+ * API params: status (active|done), list, label, page, pageSize.
+ * No date range — use movements for date-filtered throughput.
+ */
 export const boardCards = (boardId, params = {}) =>
   aresClient().get(`/boards/${boardId}/cards`, { params })
-    .then(r => ({ data: r.data?.data, meta: r.data?.meta || {} }))
+    .then(r => ({ data: r.data?.data || [], meta: r.data?.meta || {} }))
 
+/**
+ * Movement events for a board.
+ * API params: dateFrom (YYYY-MM-DD), dateTo (YYYY-MM-DD), page, pageSize.
+ */
 export const boardMovements = (boardId, params = {}) =>
   aresClient().get(`/boards/${boardId}/movements`, { params })
-    .then(r => ({ data: r.data?.data, meta: r.data?.meta || {} }))
+    .then(r => ({ data: r.data?.data || [], meta: r.data?.meta || {} }))
 
 export const cycleTime = (rtProjectId, params = {}) =>
   aresClient().get('/cycle-time', { params: { rtProjectId, ...params } })
-    .then(r => ({ data: r.data?.data, meta: r.data?.meta || {} }))
+    .then(r => ({ data: r.data?.data || [], meta: r.data?.meta || {} }))
 
 export const listRaintoolProjects = () =>
   rtClient().get('/project/list-active-projects')

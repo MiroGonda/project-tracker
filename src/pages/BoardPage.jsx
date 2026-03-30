@@ -17,57 +17,57 @@ import Spinner from '../components/Spinner'
 import Toast from '../components/Toast'
 import useToast from '../hooks/useToast'
 
-// ─── Constants ─────────────────────────────────────────────────────────────────
+// ─── Constants ───────────────────────────────────────────────────────────────
 
 const LANE_MAP = {
-  'Backlog':               { type: 'backlog',  category: 'Backlog',     status: 'Backlog' },
-  'Icebox':                { type: 'backlog',  category: 'Backlog',     status: 'Icebox' },
-  'Ideas':                 { type: 'backlog',  category: 'Backlog',     status: 'Ideas' },
-  'Ready':                 { type: 'ready',    category: 'Ready',       status: 'Ready' },
-  'Ready for Dev':         { type: 'ready',    category: 'Ready',       status: 'Ready for Dev' },
-  'Ready for Development': { type: 'ready',    category: 'Ready',       status: 'Ready for Development' },
-  'Next Up':               { type: 'ready',    category: 'Ready',       status: 'Next Up' },
-  'Prioritized':           { type: 'ready',    category: 'Ready',       status: 'Prioritized' },
-  'In Progress':           { type: 'wip',      category: 'In Progress', status: 'In Progress' },
-  'In Development':        { type: 'wip',      category: 'In Progress', status: 'In Development' },
-  'Development':           { type: 'wip',      category: 'In Progress', status: 'Development' },
-  'Working On':            { type: 'wip',      category: 'In Progress', status: 'Working On' },
-  'Active':                { type: 'wip',      category: 'In Progress', status: 'Active' },
-  'Review':                { type: 'review',   category: 'Review',      status: 'Review' },
-  'In Review':             { type: 'review',   category: 'Review',      status: 'In Review' },
-  'Code Review':           { type: 'review',   category: 'Review',      status: 'Code Review' },
-  'PR Review':             { type: 'review',   category: 'Review',      status: 'PR Review' },
-  'QA':                    { type: 'review',   category: 'Review',      status: 'QA' },
-  'QA Review':             { type: 'review',   category: 'Review',      status: 'QA Review' },
-  'Testing':               { type: 'review',   category: 'Review',      status: 'Testing' },
-  'UAT':                   { type: 'review',   category: 'Review',      status: 'UAT' },
-  'Blocked':               { type: 'blocked',  category: 'Blocked',     status: 'Blocked' },
-  'On Hold':               { type: 'blocked',  category: 'Blocked',     status: 'On Hold' },
-  'Waiting':               { type: 'blocked',  category: 'Blocked',     status: 'Waiting' },
-  'Waiting for Feedback':  { type: 'blocked',  category: 'Blocked',     status: 'Waiting for Feedback' },
-  'Done':                  { type: 'done',     category: 'Done',        status: 'Done' },
-  'Completed':             { type: 'done',     category: 'Done',        status: 'Completed' },
-  'Finished':              { type: 'done',     category: 'Done',        status: 'Finished' },
-  'Closed':                { type: 'done',     category: 'Done',        status: 'Closed' },
-  'Released':              { type: 'done',     category: 'Done',        status: 'Released' },
-  'Deployed':              { type: 'done',     category: 'Done',        status: 'Deployed' },
-  'Done - This Week':      { type: 'done',     category: 'Done',        status: 'Done - This Week' },
-  'Done - Last Week':      { type: 'done',     category: 'Done',        status: 'Done - Last Week' },
-  'Done - This Month':     { type: 'done',     category: 'Done',        status: 'Done - This Month' },
-  'Archive':               { type: 'archived', category: 'Archived',    status: 'Archived' },
-  'Archived':              { type: 'archived', category: 'Archived',    status: 'Archived' },
-  "Won't Do":              { type: 'archived', category: 'Archived',    status: "Won't Do" },
-  'Cancelled':             { type: 'archived', category: 'Archived',    status: 'Cancelled' },
+  'Backlog':               { type: 'backlog',  status: 'Backlog' },
+  'Icebox':                { type: 'backlog',  status: 'Icebox' },
+  'Ideas':                 { type: 'backlog',  status: 'Ideas' },
+  'Ready':                 { type: 'ready',    status: 'Ready' },
+  'Ready for Dev':         { type: 'ready',    status: 'Ready for Dev' },
+  'Ready for Development': { type: 'ready',    status: 'Ready for Development' },
+  'Next Up':               { type: 'ready',    status: 'Next Up' },
+  'Prioritized':           { type: 'ready',    status: 'Prioritized' },
+  'In Progress':           { type: 'wip',      status: 'In Progress' },
+  'In Development':        { type: 'wip',      status: 'In Development' },
+  'Development':           { type: 'wip',      status: 'Development' },
+  'Working On':            { type: 'wip',      status: 'Working On' },
+  'Active':                { type: 'wip',      status: 'Active' },
+  'Review':                { type: 'review',   status: 'Review' },
+  'In Review':             { type: 'review',   status: 'In Review' },
+  'Code Review':           { type: 'review',   status: 'Code Review' },
+  'PR Review':             { type: 'review',   status: 'PR Review' },
+  'QA':                    { type: 'review',   status: 'QA' },
+  'QA Review':             { type: 'review',   status: 'QA Review' },
+  'Testing':               { type: 'review',   status: 'Testing' },
+  'UAT':                   { type: 'review',   status: 'UAT' },
+  'Blocked':               { type: 'blocked',  status: 'Blocked' },
+  'On Hold':               { type: 'blocked',  status: 'On Hold' },
+  'Waiting':               { type: 'blocked',  status: 'Waiting' },
+  'Waiting for Feedback':  { type: 'blocked',  status: 'Waiting for Feedback' },
+  'Done':                  { type: 'done',     status: 'Done' },
+  'Completed':             { type: 'done',     status: 'Completed' },
+  'Finished':              { type: 'done',     status: 'Finished' },
+  'Closed':                { type: 'done',     status: 'Closed' },
+  'Released':              { type: 'done',     status: 'Released' },
+  'Deployed':              { type: 'done',     status: 'Deployed' },
+  'Done - This Week':      { type: 'done',     status: 'Done - This Week' },
+  'Done - Last Week':      { type: 'done',     status: 'Done - Last Week' },
+  'Done - This Month':     { type: 'done',     status: 'Done - This Month' },
+  'Archive':               { type: 'archived', status: 'Archived' },
+  'Archived':              { type: 'archived', status: 'Archived' },
+  "Won't Do":              { type: 'archived', status: "Won't Do" },
+  'Cancelled':             { type: 'archived', status: 'Cancelled' },
 }
 
 const DIST_COLORS  = {
   backlog: '#6b7280', ready: '#3b82f6', wip: '#a855f7',
   review:  '#f59e0b', blocked: '#ef4444', done: '#10b981', archived: '#374151',
 }
-const STATUS_ORDER = ['backlog', 'ready', 'wip', 'review', 'blocked', 'done', 'archived']
+const STATUS_ORDER       = ['backlog', 'ready', 'wip', 'review', 'blocked', 'done', 'archived']
 const PROCESS_COL_GROUPS = ['wip', 'review', 'blocked']
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function getDateRange(period) {
   const now = new Date()
@@ -87,8 +87,9 @@ function fmtDateShort(iso) {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
+// API returns currentList (not list_name / listName / list)
 function extractList(card) {
-  return card?.list_name || card?.listName || card?.list || ''
+  return card?.currentList || card?.list_name || card?.listName || card?.list || ''
 }
 
 function extractDate(card) {
@@ -124,8 +125,11 @@ function formatPeriodLabel(key, granularity) {
 function aggregateThroughput(movements, granularity) {
   const map = {}
   for (const m of movements) {
-    if (LANE_MAP[m.to_list || m.toList || '']?.type !== 'done') continue
-    const date = m.date || m.moved_at || m.movedAt
+    // API uses camelCase — toList is the most likely field name
+    const toList = m.toList || m.to_list || m.toLane || ''
+    if (LANE_MAP[toList]?.type !== 'done') continue
+    // API date field: try camelCase first, then snake_case
+    const date = m.movedAt || m.date || m.moved_at || m.timestamp
     if (!date) continue
     const key = getPeriodKey(date, granularity)
     map[key] = (map[key] || 0) + 1
@@ -313,7 +317,7 @@ function ThroughputSection({ movements, boardId }) {
 function PipelineDistribution({ cards }) {
   const counts = {}
   for (const c of cards) {
-    const t = (LANE_MAP[extractList(c)]?.type) || 'backlog'
+    const t = LANE_MAP[extractList(c)]?.type || 'backlog'
     counts[t] = (counts[t] || 0) + 1
   }
   const total = Object.values(counts).reduce((s, v) => s + v, 0)
@@ -390,8 +394,8 @@ function CardsTable({ cards }) {
             <th className="text-left py-1.5">Due</th>
           </tr></thead>
           <tbody>
-            {paged.map(c => (
-              <tr key={c.id} className="border-b border-border/50 hover:bg-white/5">
+            {paged.map((c, i) => (
+              <tr key={c.id || i} className="border-b border-border/50 hover:bg-white/5">
                 <td className="py-1.5 pr-3 text-text-primary max-w-xs truncate">{c.name}</td>
                 <td className="py-1.5 pr-3 text-text-muted">{extractList(c)}</td>
                 <td className="py-1.5 text-text-muted">{fmtDateShort(extractDate(c))}</td>
@@ -465,9 +469,9 @@ function CycleTimeSection({ rtProjects }) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function BoardPage() {
-  const { boardId }             = useParams()
+  const { boardId }                                     = useParams()
   const { admin, accessibleIds, config, loading: accessLoading } = useAccess()
-  const { toasts, toast, dismiss } = useToast()
+  const { toasts, toast, dismiss }                      = useToast()
 
   const [configMissing, setConfigMissing] = useState(false)
   const [boardName,  setBoardName]  = useState(() => config?.boards?.[boardId]?.name || '')
@@ -478,32 +482,36 @@ export default function BoardPage() {
   const [loading,    setLoading]    = useState(false)
   const [error,      setError]      = useState(null)
 
-  // API config check
   useEffect(() => {
     const host   = localStorage.getItem('ares_host')
     const apiKey = localStorage.getItem('ares_api_key')
     setConfigMissing(!host || !apiKey)
   }, [])
 
-  // Keep board name in sync if config loads after render
   useEffect(() => {
     if (config?.boards?.[boardId]?.name) setBoardName(config.boards[boardId].name)
   }, [config, boardId])
 
-  // Load board data
   const loadData = useCallback(async () => {
     if (configMissing || !boardId) return
     setLoading(true); setError(null)
     const { start, end } = getDateRange(period)
     try {
       const [c, m, s] = await Promise.all([
-        boardCards(boardId,     { start_date: start, end_date: end }),
-        boardMovements(boardId, { start_date: start, end_date: end }),
+        // Cards: fetch active cards (no date range — API doesn't support it)
+        // Use pageSize=200 to maximise results in one request
+        boardCards(boardId, { status: 'active', pageSize: 200 }),
+        // Movements: API uses dateFrom / dateTo (not start_date / end_date)
+        boardMovements(boardId, { dateFrom: start, dateTo: end, pageSize: 200 }),
         boardSummary(boardId).catch(() => null),
       ])
       setCards(c.data     || [])
       setMovements(m.data || [])
-      if (s?.name || s?.board_name) setBoardName(s.name || s.board_name)
+      // Board name from summary — API likely returns projectName
+      if (s) {
+        const name = s.projectName || s.name || s.boardName || s.board_name
+        if (name) setBoardName(name)
+      }
     } catch (e) {
       setError(e.message)
       toast.error(`Error: ${e.message}`)
@@ -512,29 +520,26 @@ export default function BoardPage() {
 
   useEffect(() => { if (!configMissing) loadData() }, [boardId, period, configMissing])
 
-  // Raintool projects
   useEffect(() => {
     if (!configMissing) listRaintoolProjects().then(setRtProjects).catch(() => {})
   }, [configMissing])
 
-  // Access check (wait for access context to load before denying)
   const hasAccess = admin || accessibleIds.has(boardId)
 
   // Derived KPIs
-  const doneCount    = movements.filter(m => LANE_MAP[m.to_list || m.toList || '']?.type === 'done').length
+  const doneCount    = movements.filter(m => LANE_MAP[m.toList || m.to_list || '']?.type === 'done').length
   const wipCount     = cards.filter(c => PROCESS_COL_GROUPS.includes(LANE_MAP[extractList(c)]?.type)).length
   const blockedCount = cards.filter(c => LANE_MAP[extractList(c)]?.type === 'blocked').length
 
   function exportPipeline() {
     exportTableAsCsv(
-      cards.map(c => [c.name, extractList(c), extractDate(c), c.id]),
-      ['Name', 'List', 'Due', 'ID'],
+      cards.map(c => [c.name, extractList(c), extractDate(c), c.boardId || boardId]),
+      ['Name', 'List', 'Due', 'Board ID'],
       `pipeline-${boardId}.csv`,
     )
   }
 
-  // ── Render guards ───────────────────────────────────────────────────────
-
+  // ── Render guards ────────────────────────────────────────────────────────────
   if (configMissing) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4 text-text-muted">
@@ -549,19 +554,18 @@ export default function BoardPage() {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4 text-text-muted">
         <AlertTriangle size={32} className="text-amber-400" />
-        <p className="text-sm">You don\'t have access to this project.</p>
+        <p className="text-sm">You don't have access to this project.</p>
         <Link to="/settings" className="btn-secondary">Back to Settings</Link>
       </div>
     )
   }
 
-  // ── Dashboard ─────────────────────────────────────────────────────────────
+  // ── Dashboard ────────────────────────────────────────────────────────────────
   return (
     <div className="h-full overflow-y-auto">
-      {/* Header */}
       <div className="sticky top-0 z-10 bg-bg/90 backdrop-blur border-b border-border px-4 py-2.5 flex items-center gap-3">
         <LayoutDashboard size={15} className="text-accent" />
-        <span className="text-sm font-semibold text-text-primary truncate max-w-[200px]">
+        <span className="text-sm font-semibold text-text-primary truncate max-w-[240px]">
           {boardName || boardId}
         </span>
         <div className="flex-1" />
@@ -589,11 +593,11 @@ export default function BoardPage() {
         : (
           <div className="p-4 flex flex-col gap-4">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <KpiCard icon={TrendingUp}    label="Throughput"   value={doneCount}    sub="completed in period" color="text-emerald-400" />
-              <KpiCard icon={Users}         label="WIP"          value={wipCount}     sub="in progress / review" color="text-purple-400" />
-              <KpiCard icon={AlertTriangle} label="Blocked"      value={blockedCount} sub="blocked cards"
+              <KpiCard icon={TrendingUp}    label="Throughput"  value={doneCount}    sub="completed in period" color="text-emerald-400" />
+              <KpiCard icon={Users}         label="WIP"         value={wipCount}     sub="in progress / review" color="text-purple-400" />
+              <KpiCard icon={AlertTriangle} label="Blocked"     value={blockedCount} sub="blocked cards"
                 color={blockedCount > 0 ? 'text-red-400' : 'text-text-primary'} />
-              <KpiCard icon={Tag}           label="Total Cards"  value={cards.length} sub="in selected period" />
+              <KpiCard icon={Tag}           label="Active Cards" value={cards.length} sub="currently active" />
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
