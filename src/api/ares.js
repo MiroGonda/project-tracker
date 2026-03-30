@@ -27,18 +27,21 @@ function rtClient() {
 
 /**
  * Returns boards normalised to { id, name, activeCards, doneCards, totalCards }.
- * API returns { boardId, projectName, activeCards, doneCards, totalCards }.
+ * API returns { ok, data: [ { boardId, projectName, ... } ] }
  */
 export const listBoards = () =>
-  aresClient().get('/boards').then(r =>
-    (r.data?.data || []).map(b => ({
+  aresClient().get('/boards').then(r => {
+    const raw = r.data?.data
+    // Guard: handle array, object-with-boards, or anything unexpected
+    const arr = Array.isArray(raw) ? raw : (Array.isArray(raw?.boards) ? raw.boards : [])
+    return arr.map(b => ({
       id:          b.boardId,
       name:        b.projectName,
       activeCards: b.activeCards,
       doneCards:   b.doneCards,
       totalCards:  b.totalCards,
     }))
-  )
+  })
 
 export const boardSummary = (boardId) =>
   aresClient().get(`/boards/${boardId}/summary`).then(r => r.data?.data)
@@ -46,11 +49,13 @@ export const boardSummary = (boardId) =>
 /**
  * Cards for a board.
  * API params: status (active|done), list, label, page, pageSize.
- * No date range — use movements for date-filtered throughput.
  */
 export const boardCards = (boardId, params = {}) =>
   aresClient().get(`/boards/${boardId}/cards`, { params })
-    .then(r => ({ data: r.data?.data || [], meta: r.data?.meta || {} }))
+    .then(r => {
+      const raw = r.data?.data
+      return { data: Array.isArray(raw) ? raw : [], meta: r.data?.meta || {} }
+    })
 
 /**
  * Movement events for a board.
@@ -58,11 +63,17 @@ export const boardCards = (boardId, params = {}) =>
  */
 export const boardMovements = (boardId, params = {}) =>
   aresClient().get(`/boards/${boardId}/movements`, { params })
-    .then(r => ({ data: r.data?.data || [], meta: r.data?.meta || {} }))
+    .then(r => {
+      const raw = r.data?.data
+      return { data: Array.isArray(raw) ? raw : [], meta: r.data?.meta || {} }
+    })
 
 export const cycleTime = (rtProjectId, params = {}) =>
   aresClient().get('/cycle-time', { params: { rtProjectId, ...params } })
-    .then(r => ({ data: r.data?.data || [], meta: r.data?.meta || {} }))
+    .then(r => {
+      const raw = r.data?.data
+      return { data: Array.isArray(raw) ? raw : [], meta: r.data?.meta || {} }
+    })
 
 export const listRaintoolProjects = () =>
   rtClient().get('/project/list-active-projects')
