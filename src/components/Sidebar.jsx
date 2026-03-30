@@ -9,7 +9,10 @@ export default function Sidebar() {
   const [collapsed,     setCollapsed]     = useState(false)
   const [apiBoards,     setApiBoards]     = useState([])
   const [boardsLoading, setBoardsLoading] = useState(false)
-  const { admin, accessibleIds, loading: configLoading } = useAccess()
+
+  // canAdmin is true in bootstrap mode (no admins set yet) for any logged-in user,
+  // as well as for established admins — so the Admin link is always reachable.
+  const { admin, canAdmin, accessibleIds, loading: configLoading } = useAccess()
 
   useEffect(() => {
     const host   = localStorage.getItem('ares_host')
@@ -25,8 +28,8 @@ export default function Sidebar() {
   })
 
   const STATIC_NAV = [
-    { to: '/settings', label: 'Settings', Icon: Settings },
-    ...(admin ? [{ to: '/admin', label: 'Admin', Icon: ShieldCheck }] : []),
+    { to: '/settings', label: 'Settings',     Icon: Settings   },
+    ...(canAdmin ? [{ to: '/admin', label: 'Admin', Icon: ShieldCheck }] : []),
   ]
 
   return (
@@ -46,20 +49,18 @@ export default function Sidebar() {
       {/* Nav */}
       <nav className="flex-1 py-3 flex flex-col gap-0.5 px-2 overflow-y-auto">
 
-        {/* Projects section label */}
         {!collapsed && (
           <p className="px-2.5 pb-1 text-[10px] text-text-muted font-medium uppercase tracking-wider">
             Projects
           </p>
         )}
 
-        {/* Board links */}
         {(boardsLoading || configLoading)
           ? <div className="flex justify-center py-2"><Spinner size={13} className="text-text-muted" /></div>
           : visibleBoards.length === 0
             ? (!collapsed && (
                 <p className="px-2.5 text-xs text-text-muted/60 italic">
-                  No boards — configure in Settings
+                  No boards — visit Admin to configure
                 </p>
               ))
             : visibleBoards.map(b => {
@@ -77,9 +78,7 @@ export default function Sidebar() {
                     }
                   >
                     <LayoutDashboard size={13} className="shrink-0" />
-                    {!collapsed && (
-                      <span className="truncate">{b.name || b.boardName}</span>
-                    )}
+                    {!collapsed && <span className="truncate">{b.name || b.boardName}</span>}
                   </NavLink>
                 )
               })
@@ -87,7 +86,6 @@ export default function Sidebar() {
 
         <div className="border-t border-border my-2" />
 
-        {/* Settings + Admin */}
         {STATIC_NAV.map(({ to, label, Icon }) => (
           <NavLink
             key={to}
@@ -106,7 +104,6 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* Collapse toggle */}
       <button
         onClick={() => setCollapsed(v => !v)}
         className="flex items-center justify-center py-3 border-t border-border text-text-muted hover:text-text-primary transition-colors"
