@@ -205,6 +205,11 @@ Add Inter font from Google Fonts in the `<head>`:
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 ```
 
+Add GIS script before `</body>`:
+```html
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+```
+
 ---
 
 ## localStorage Schema
@@ -217,11 +222,14 @@ All persistence uses `localStorage`. Key names:
 | `ares_api_key` | string | API key for Ares |
 | `raintool_host` | string | Default: `https://hailstorm.frostdesigngroup.com` |
 | `selected_board_id` | string | Last-selected board ID |
+| `ppms_last_board` | string | Last-viewed board ID (restore on reload) |
 | `targets_{boardId}` | JSON string | Array of `{id, startDate, endDate, value}` for throughput targets |
 | `ppms_theme` | `'dark'` \| `'light'` | Theme preference |
 | `google_access_token` | string | Google OAuth access token (expires) |
 | `google_token_expiry` | string | ISO timestamp of token expiry |
 | `google_user_email` | string | Connected Google account email |
+| `ppms_snapshot_{boardId}_{weekKey}` | JSON string | Weekly board snapshot for period-over-period comparison |
+| `ppms_snapshot_index_{boardId}` | JSON string | Sorted array of saved week keys for a board (max 52) |
 
 ---
 
@@ -327,8 +335,6 @@ export const useTheme = () => useContext(ThemeContext)
 
 GitHub Pages has no server to store the `client_secret`. Use **Google Identity Services (GIS)**, which handles browser-side OAuth 2.0 using access tokens directly. No client secret is exposed.
 
-This is the standard approach for SPAs and is fully supported by Google.
-
 **Scopes to request:**
 ```
 openid
@@ -339,8 +345,6 @@ https://www.googleapis.com/auth/drive
 https://www.googleapis.com/auth/calendar.readonly
 ```
 
-Pre-requesting all scopes means the user won't be re-prompted when features are added later.
-
 ### Google Cloud Console Setup (one-time, done by user)
 
 1. Go to [console.cloud.google.com](https://console.cloud.google.com)
@@ -348,18 +352,11 @@ Pre-requesting all scopes means the user won't be re-prompted when features are 
 3. APIs & Services → Credentials → Create Credentials → OAuth client ID
 4. Application type: **Web application**
 5. Authorized JavaScript origins: add your GitHub Pages URL, e.g. `https://yourusername.github.io`
-6. Authorized redirect URIs: add `https://yourusername.github.io/ares-dashboard/settings` (the Settings page URL where the callback is handled)
+6. Authorized redirect URIs: add `https://yourusername.github.io/ares-dashboard/settings`
 7. Copy the **Client ID** (NOT the client secret — it is not used here)
 8. In the app's Settings page, paste the Client ID into the "Google Client ID" field
 
 The Client ID is stored in `localStorage` as `google_client_id`. It is not a secret.
-
-### GIS Library Loading
-
-Add to `index.html` before `</body>`:
-```html
-<script src="https://accounts.google.com/gsi/client" async defer></script>
-```
 
 ### `src/api/google.js`
 
@@ -394,12 +391,6 @@ export function disconnectGoogle() {
   localStorage.removeItem('google_user_email')
 }
 
-/**
- * Initiates a GIS token request popup. Calls onSuccess({ access_token, email })
- * or onError(message) when done.
- *
- * Must be called from a user gesture (button click).
- */
 export function connectGoogle({ onSuccess, onError }) {
   const clientId = localStorage.getItem('google_client_id')
   if (!clientId) {
@@ -423,7 +414,6 @@ export function connectGoogle({ onSuccess, onError }) {
       localStorage.setItem('google_access_token', tokenResponse.access_token)
       localStorage.setItem('google_token_expiry', expiresAt)
 
-      // Fetch user email from Google userinfo endpoint
       try {
         const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
           headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
@@ -440,7 +430,7 @@ export function connectGoogle({ onSuccess, onError }) {
 }
 ```
 
-> **Note on access tokens:** GIS browser-side tokens expire (typically 1 hour). The `isGoogleConnected()` check uses the stored expiry time. The user will need to reconnect periodically. This is normal for browser-only OAuth apps.
+> **Note on access tokens:** GIS tokens expire (~1 hour). The user will need to reconnect periodically. This is normal for browser-only OAuth apps.
 
 ---
 
@@ -452,8 +442,8 @@ Sections to implement:
 - Text input: **Ares Host** (e.g. `https://my-ares.example.com`) → saved to `localStorage.ares_host`
 - Text input: **Ares API Key** → saved to `localStorage.ares_api_key`
 - Text input: **Raintool Host** → saved to `localStorage.raintool_host`, pre-filled with `https://hailstorm.frostdesigngroup.com`
-- "Save" button for each (or a single Save for all three)
-- Show a warning notice: "The Ares server must have CORS enabled for browser requests to work."
+- "Save" button (or one per field)
+- Warning notice: "The Ares server must have CORS enabled for browser requests to work."
 
 ### 2. Google Account
 - Text input: **Google Client ID** → saved to `localStorage.google_client_id`
@@ -487,9 +477,19 @@ function Divider() {
 
 ## Ares Page — `src/pages/Ares.jsx`
 
-This is a direct port of `frontend/src/pages/Project.jsx` from PPMS. The logic is identical. The only changes needed are:
+This is a direct port of `frontend/src/pages/Project.jsx` from PPMS. All logic is preserved. Only a small set of substitutions are needed to make it work without a backend.
 
-### 1. Replace backend API calls with direct calls
+### Required npm packages
+```
+recharts                   (BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ComposedChart, Area)
+lucide-react               (LayoutDashboard, RefreshCw, AlertTriangle, CheckCircle2, Clock, TrendingUp, Users, Tag,
+                            ChevronDown, ChevronUp, Circle, AlertCircle, X, Calendar, Download, Check, Minimize2, Target)
+react-router-dom           (Link — used in the config-missing guard only)
+```
+
+---
+
+### 1. Replace backend API imports with direct calls
 
 **Before (PPMS):**
 ```js
@@ -500,41 +500,64 @@ import { getSettings, updateSetting } from '../api/settings'
 **After (Ares Dashboard):**
 ```js
 import { listBoards, boardCards, boardMovements, boardSummary, cycleTime, listRaintoolProjects } from '../api/ares'
+// No settings import needed — all persistence uses localStorage
 ```
+
+---
 
 ### 2. Replace settings persistence with localStorage
 
-In PPMS, throughput targets are saved/loaded via `getSettings()` / `updateSetting()` API calls. In this project, replace those with direct localStorage reads/writes:
+The `ThroughputSection` sub-component loads and saves throughput targets via the PPMS settings API. Replace both effects with localStorage:
 
 **Before:**
 ```js
-// Load targets
+// Load
 getSettings().then(r => {
   const raw = r.data[`targets_${boardId}`]
   setTargets(raw ? JSON.parse(raw) : [])
-})
-// Save targets
+}).catch(() => setTargets([]))
+  .finally(() => { targetsLoadedRef.current = true })
+
+// Save
 updateSetting(`targets_${boardId}`, JSON.stringify(targets))
 ```
 
 **After:**
 ```js
-// Load targets
+// Load
 const raw = localStorage.getItem(`targets_${boardId}`)
 setTargets(raw ? JSON.parse(raw) : [])
-// Save targets
+targetsLoadedRef.current = true
+
+// Save
 localStorage.setItem(`targets_${boardId}`, JSON.stringify(targets))
 ```
 
-### 3. Replace board persistence
+---
 
-**Before (PPMS):** Board selection persisted via `getSettings()` / `updateSetting('selected_board_id', ...)`
+### 3. Replace board selection persistence
 
-**After:** Use `localStorage.getItem('selected_board_id')` / `localStorage.setItem('selected_board_id', boardId)`
+**Before (PPMS):**
+```js
+// Restore
+const lastBoardId = localStorage.getItem('ppms_last_board')  // ← already localStorage in PPMS
+// Save
+localStorage.setItem('ppms_last_board', b.boardId)            // ← already localStorage in PPMS
+```
 
-### 4. Add a config-not-set guard
+Both of these already use `localStorage` directly in PPMS, so no change needed here.
 
-At the top of the Ares component's data-loading effect, check if the API is configured:
+---
+
+### 4. Snapshot infrastructure — already localStorage-based
+
+The snapshot functions (`saveProjectSnapshot`, `getProjectSnapshot`, `getPreviousProjectSnapshot`, `getSnapshotIndex`) all write directly to `localStorage` in PPMS. Copy them verbatim — no changes needed.
+
+---
+
+### 5. Add a config-not-set guard
+
+At the top of the `Project` component's board-loading effect, check if the Ares API is configured:
 
 ```js
 useEffect(() => {
@@ -542,6 +565,7 @@ useEffect(() => {
   const apiKey = localStorage.getItem('ares_api_key')
   if (!host || !apiKey) {
     setConfigMissing(true)
+    setLoadingBoards(false)
     return
   }
   setConfigMissing(false)
@@ -549,7 +573,7 @@ useEffect(() => {
 }, [])
 ```
 
-If `configMissing` is true, render a prompt:
+If `configMissing` is true, render a prompt in place of the dashboard:
 ```jsx
 {configMissing && (
   <div className="flex flex-col items-center justify-center h-full gap-4 text-text-muted">
@@ -560,22 +584,225 @@ If `configMissing` is true, render a prompt:
 )}
 ```
 
-### 5. Everything else is identical
+---
 
-Copy the entire content of `Project.jsx` from PPMS verbatim:
-- All helper functions (`getDateRange`, `isOverdue`, `fmtDate`, `fmtDateShort`, `extractDate`, `extractList`, `getPeriodKey`, `formatPeriodLabel`, `aggregateThroughput`, `computeTargetForPeriod`)
-- The full `LANE_MAP` constant (100+ entries mapping Trello list names to `{type, category, status}`)
-- `DIST_COLORS`, `TRELLO_COLORS`, `STATUS_ORDER`, `STATUS_ABBREV`, `STATUS_COLOR`, `PROCESS_COL_GROUPS`, `WORK_COL_GROUPS`
-- All sub-components: `StatusDistBar`, `KpiCard`, `SectionCard`, `ThroughputTooltip`, `TargetsPanel`, `ThroughputSection`, `DistBar`, `PipelineDistribution`, `PipelineTableView`, `CardsTable`, `CycleTimeSection`
-- Export helpers: `exportChartAsPng`, `exportTableAsPng`, `exportPipelineTableAsCsv`
-- The main `Project` / `Ares` component function
+### 6. Full component inventory (copy verbatim from PPMS)
 
-**Note on imports:** The Ares page uses these libraries. Ensure all are installed:
+Copy every function and component exactly as-is from `Project.jsx`. The list below documents each piece and its purpose for reference:
+
+#### Helper functions
+| Function | Purpose |
+|---|---|
+| `getDateRange(days)` | Returns `{ dateFrom, dateTo }` for a rolling N-day window |
+| `isOverdue(due)` | Returns true if a due date is in the past |
+| `fmtDate(iso)` | Formats ISO date as "Jan 1, 2026" |
+| `fmtDateShort(iso)` | Formats ISO date as "Jan 1" |
+| `extractDate(m)` | Tries multiple field name variants to find a movement date |
+| `extractList(m)` | Tries multiple field name variants to find a list name |
+| `getPeriodKey(d, period)` | Returns a sort key for daily/weekly/monthly bucketing |
+| `formatPeriodLabel(key, period)` | Formats a period key into a human-readable label |
+| `aggregateThroughput(doneCards, period, cutoff)` | Buckets done cards by period, split by Work/Process lane type |
+| `computeTargetForPeriod(periodKey, period, targets)` | Scales a throughput target to a chart period's date range |
+| `extractMcNumber(name)` | Extracts "MC-123" from a card name via regex |
+| `extractCycleDays(record)` | Normalises cycle time fields (cycleHours → days) |
+| `extractCardKey(record)` | Gets a stable card identifier from a cycle time record |
+| `resolveRtProjectId(boardName, rtProjects)` | Fuzzy-matches a board name to a Raintool project ID |
+| `getISOWeekKey(date)` | Returns an ISO week string e.g. "2026-W12" |
+
+#### Constants
+| Constant | Purpose |
+|---|---|
+| `TRELLO_COLORS` | Maps Trello color names to Tailwind bg/text/dot classes |
+| `DIST_COLORS` | Maps lane types, categories, and statuses to hex colors |
+| `STATUS_ORDER` | `['Pending', 'Ongoing', 'For Review', 'Revising', 'For Approval', 'Done']` |
+| `STATUS_ABBREV` | Short labels for table column headers (`Pnd`, `Ong`, etc.) |
+| `STATUS_COLOR` | Maps status names to hex colors for table cell highlighting |
+| `LANE_MAP` | 100+ entries mapping Trello list names to `{type, category, status}` |
+| `PROCESS_COL_GROUPS` | Column group definitions for the Process lane pipeline table |
+| `WORK_COL_GROUPS` | Column group definitions for the Work lane pipeline table |
+| `DATE_RANGES` | `[{ label: '7d', days: 7 }, { label: '30d', days: 30 }]` |
+| `PERIOD_OPTS` | `[{ label: 'Daily', value: 'daily' }, { label: 'Weekly', value: 'weekly' }, { label: 'Monthly', value: 'monthly' }]` |
+| `MONTH_NAMES` | `['Jan', 'Feb', ..., 'Dec']` |
+
+#### Sub-components
+| Component | Props | Purpose |
+|---|---|---|
+| `StatusDistBar` | `{ cards }` | Segmented horizontal bar showing % breakdown by status (Pending/Ongoing/Done/etc.). Rendered as footer inside Active Cards KPI card. |
+| `KpiCard` | `{ icon, label, value, sub, accent, loading, footer, onClick }` | KPI metric card. `footer` renders below value. `onClick` adds hover/cursor styling. Used for 4-card KPI row. |
+| `SectionCard` | `{ title, children, className, headerRight, drilldown, done }` | Section wrapper card. `drilldown` prop applies fuchsia border/header. `done` prop applies green border/header. Normal state: default gray border. |
+| `ThroughputTooltip` | recharts tooltip props | Custom tooltip: shows bar values + total + target line value. |
+| `TargetsPanel` | `{ targets, onAdd, onDelete, onClose }` | Floating panel for managing throughput targets. Two input modes: "Month Picker" (grid of month buttons + year nav) and "Custom Range" (two date inputs). Shows rate preview (≈ X/day). Renders existing targets as deletable rows. |
+| `ThroughputSection` | `{ doneCards, loading, cutoff, boardName, boardId, onBarClick, onPeriodChange, allowedPeriods, view, onViewChange, exportRef }` | The throughput chart OR table, depending on `view`. Includes period toggle (Daily/Weekly/Monthly), Targets button, export. Chart: stacked bar (Work=indigo, Process=purple) + optional target area line (amber dashed). Table: scrollable table with Period/Work/Process/Total columns + optional Target/vs-Target columns when targets exist. |
+| `DistBar` | `{ label, count, mapped, color }` | Single horizontal progress bar with label and count. Used inside `PipelineDistribution`. |
+| `PipelineDistribution` | `{ cards, loading }` | Tabbed distribution view: "Category" tab shows category bars, "Type" tab shows Work/Process bars, "Labels" tab shows label pills + bars. Unrecognised card count shown as footnote. |
+| `CycleTimeSummary` | `{ cycleTimeData, loading }` | 2×2 grid of metric boxes: Aging Cards (>p85), p85 Cycle Time, Client Turnaround (avg of "Sent for" lanes), Pipeline (avg of non-"Sent for" lanes). All in days. |
+| `ThroughputDrilldownTable` | `{ cards }` | Table shown when a throughput bar is clicked. Columns: Card name, Lane (list name badge), Type (Work/Process pill), Labels (up to 3 colored pills), Completed date. Responsive (md/lg hidden columns). |
+| `FilterPicker` | `{ label, options, selected, onToggle }` | Searchable multi-select dropdown. Trigger button shows active count badge. Dropdown has search input + scrollable option list + "Clear all" footer. Single-toggle via click; passing `null` to `onToggle` clears all. |
+| `PipelineTableView` | `{ activeCards, doneCards, loading, compact, exportRef, onCellClick }` | MC# × category/status matrix table. Toggle between "Process" and "Work" lane types. Two display modes: **Full** (category header row + status sub-columns) and **Compact** (single column per status, aggregated across categories). Cells are clickable → triggers drilldown. Done% column color-coded by percentage. CSV export via `exportRef`. |
+| `CardsTable` | `{ cards, loading, listOptions, labelOptions, listFilter, labelFilter, onListToggle, onLabelToggle, cycleTimeMap, typeFilter, onTypeFilterChange, hideOverdue, initialSearch }` | Full-featured paginated card table (15 per page). Filters: text search, Lists multi-select, Labels multi-select, All/Work/Process type toggle, Overdue-only toggle. Sortable columns: Card name, List, Due date, Last activity. Columns: MC# badge, card name (with overdue warning icon), Type pill, List badge, Labels (up to 3 pills + overflow count), Members (up to 2 + overflow), Due date, Cycle time. |
+
+#### Export helpers
+| Function | Purpose |
+|---|---|
+| `exportChartAsPng(containerEl, filename, { isDark, title })` | Clones the SVG chart, draws it to a 2× DPR canvas with bg fill and optional title text, downloads as PNG. |
+| `exportTableAsPng(data, period, boardName, isDark)` | Renders the throughput data table to a 2× DPR canvas (title, column headers, striped rows with per-row color for vs-Target column), downloads as PNG. |
+| `exportPipelineTableAsCsv(rows, colGroups, tableType, boardName)` | Serialises pipeline table rows to CSV with MC# + category columns + Done%, downloads as .csv. |
+
+#### Snapshot helpers
+| Function | Purpose |
+|---|---|
+| `saveProjectSnapshot(boardId, boardName, activeCards, doneCards)` | Saves a weekly snapshot to `localStorage`. Key: `ppms_snapshot_{boardId}_{weekKey}`. Captures active/done counts, overdue count, process/work active counts, throughput last 7d/30d, lane breakdown. Max 52 weeks per board (auto-prunes oldest). |
+| `getProjectSnapshot(boardId, weekKey)` | Reads a specific week's snapshot from localStorage. |
+| `getPreviousProjectSnapshot(boardId)` | Returns the most recent snapshot strictly older than the current ISO week. |
+| `getSnapshotIndex(boardId)` | Returns sorted array of all saved week keys for a board. |
+
+---
+
+### 7. Main component state (`Project` / `Ares`)
+
+```js
+// Board data
+const [boards,        setBoards]        = useState([])
+const [selectedBoard, setSelectedBoard] = useState(null)
+const [dateRange,     setDateRange]     = useState(30)
+const [rtProjectMap,  setRtProjectMap]  = useState({})  // boardId → rtProjectId
+
+// API data
+const [summary,       setSummary]       = useState(null)
+const [activeCards,   setActiveCards]   = useState([])
+const [doneCards,     setDoneCards]     = useState([])
+const [movements,     setMovements]     = useState([])
+const [cycleTimeData, setCycleTimeData] = useState([])
+
+// Loading / error
+const [loadingBoards,       setLoadingBoards]       = useState(true)
+const [loadingBoard,        setLoadingBoard]        = useState(false)
+const [error,               setError]               = useState(null)
+const [lastRefreshed,       setLastRefreshed]        = useState(null)
+
+// View state
+const [throughputDrilldown, setThroughputDrilldown] = useState(null)  // bucket object or null
+const [doneDrilldown,       setDoneDrilldown]       = useState(false)
+const [pipelineView,        setPipelineView]        = useState('list')   // 'list' | 'table'
+const [pipelineCompact,     setPipelineCompact]     = useState(false)
+const [throughputView,      setThroughputView]      = useState('chart')  // 'chart' | 'table'
+const [typeFilter,          setTypeFilter]          = useState('all')    // 'all' | 'work' | 'process'
+const [drilldownSearch,     setDrilldownSearch]     = useState('')
+
+// Refs for export
+const throughputExportRef = useRef(null)
+const pipelineExportRef   = useRef(null)
+
+// Shared pipeline filters (active cards + throughput)
+const [listFilter,  setListFilter]  = useState(new Set())
+const [labelFilter, setLabelFilter] = useState(new Set())
+
+// Done drilldown filters (separate from pipeline filters)
+const [doneListFilter,  setDoneListFilter]  = useState(new Set())
+const [doneLabelFilter, setDoneLabelFilter] = useState(new Set())
+
+// Custom date range
+const [customRange,   setCustomRange]   = useState(null)   // { from, to } or null
+const [showCalendar,  setShowCalendar]  = useState(false)
+const [pendingFrom,   setPendingFrom]   = useState(`${new Date().getFullYear()}-01-01`)
+const [pendingTo,     setPendingTo]     = useState(today)
 ```
-recharts                   (BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ComposedChart, Area)
-lucide-react               (LayoutDashboard, RefreshCw, AlertTriangle, CheckCircle2, Clock, TrendingUp, Users, Tag, ChevronDown, ChevronUp, Circle, AlertCircle, X, Calendar, Download, Check, Minimize2, Target)
-react-router-dom           (Link — used in the config-missing guard only)
+
+---
+
+### 8. Data loading logic
+
+On mount, `Promise.all([listBoards(), listRaintoolProjects()])` runs. The board list is deduplicated by `boardId`. Raintool projects are fuzzy-matched to board names via `resolveRtProjectId` to build a `rtProjectMap`.
+
+The last-viewed board is restored from `localStorage.getItem('ppms_last_board')`. If found in the board list, it is selected first; otherwise the first board is used.
+
+`loadBoardData(boardId, dateFrom, dateTo, rtProjectId, boardName)` runs `Promise.all` on:
+1. `boardSummary(boardId)` — board-level summary object
+2. `boardCards(boardId, { status: 'active', pageSize: 200 })` — active cards
+3. `boardCards(boardId, { status: 'done', pageSize: 200 })` — done cards
+4. `boardMovements(boardId, { dateFrom, dateTo, pageSize: 200 })` — movements in range
+5. `fetchAllCycleTime(rtProjectId, dateFrom, dateTo)` — paginated cycle time (200/page)
+
+After loading, `saveProjectSnapshot` is called to capture the weekly board state.
+
+---
+
+### 9. Derived data (useMemo)
+
+| Variable | Derived from |
+|---|---|
+| `overdueCount` | `activeCards` filtered by `typeFilter`, then by `isOverdue` |
+| `periodActiveCount` | `activeCards` filtered by `typeFilter` + `dateLastActivity >= cutoff` |
+| `periodDoneCount` | `doneCards` filtered by `typeFilter` + `dateLastActivity >= cutoff` |
+| `listOptions` | Unique list names from `activeCards` |
+| `labelOptions` | Unique label names from `activeCards` |
+| `cycleTimeMap` | Map of `cardId → days` from `cycleTimeData` |
+| `filteredActiveCards` | `activeCards` filtered by `listFilter`, `labelFilter`, `typeFilter` |
+| `filteredDoneCards` | `doneCards` filtered by `listFilter`, `labelFilter`, `typeFilter` |
+| `doneListOptions` | Unique list names from `doneCards` |
+| `doneLabelOptions` | Unique label names from `doneCards` |
+| `filteredDoneForDrilldown` | `doneCards` filtered by `typeFilter`, `doneListFilter`, `doneLabelFilter` |
+| `doneTypeBreakdown` | `{ work, process }` counts from `doneCards` |
+| `throughputCutoff` | Date object from `customRange.from` or `dateRange` days ago |
+| `allowedPeriods` | `['daily']` for 7d; `['daily','weekly']` for 30d; all three for custom range |
+| `periodLabel` | `"MM/DD – MM/DD"` or `"last Nd"` |
+
+---
+
+### 10. Page layout — render structure
+
 ```
+┌─ Header ──────────────────────────────────────────────────────────────────────┐
+│  "Project Dashboard" title  |  Board selector  |  7d/30d/custom  |  Refresh  │
+└───────────────────────────────────────────────────────────────────────────────┘
+
+┌─ KPI row (2-col mobile / 4-col desktop) ──────────────────────────────────────┐
+│  Active Cards (w/ StatusDistBar footer)                                        │
+│  Done Cards (clickable → done drilldown, w/ Work/Process breakdown footer)    │
+│  Overdue (red if > 0)                                                          │
+│  Period Activity (movement count)                                              │
+└───────────────────────────────────────────────────────────────────────────────┘
+
+┌─ 4:2:2 section grid (stacks to 1-col on mobile) ──────────────────────────────┐
+│  Throughput (4 cols)           │  Cycle Time (2)  │  Pipeline Dist (2)         │
+│  [chart/table toggle][export]  │  p85 / Aging /   │  Category/Type/Labels      │
+│  ThroughputSection             │  Client / Pipeline│  tabs w/ DistBars          │
+└───────────────────────────────────────────────────────────────────────────────┘
+
+┌─ Pipeline section (full width) — switches between three states ────────────────┐
+│  STATE A: Active Cards (default)                                               │
+│    Header: "Pipeline (N of M)" | [Compact] [Export] [List|Table] toggles      │
+│    List view:  CardsTable (with listFilter/labelFilter/typeFilter/overdue)     │
+│    Table view: PipelineTableView (Process/Work MC# matrix, clickable cells)   │
+│                                                                                │
+│  STATE B: Throughput Drilldown (when a bar is clicked)                         │
+│    Header: "Throughput — {label} (N cards)" | [← Back] button                 │
+│    Body: ThroughputDrilldownTable                                              │
+│    Border: fuchsia                                                             │
+│                                                                                │
+│  STATE C: Done Cards Drilldown (when Done KPI card is clicked)                 │
+│    Header: "Done Cards — N of M" | [← Back] button                            │
+│    Body: CardsTable (w/ done-specific doneListFilter/doneLabelFilter)          │
+│    Border: green                                                               │
+└───────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 11. Interaction wiring
+
+| Interaction | Effect |
+|---|---|
+| Board selector change | Calls `loadBoardData`, saves to `ppms_last_board`, resets all filters/drilldowns |
+| 7d/30d preset click | Sets `dateRange`, clears `customRange` — does NOT auto-reload (reload on next board change or Refresh) |
+| Custom range Apply | Sets `customRange` — same pattern |
+| Refresh button | Calls `loadBoardData` with current range |
+| Throughput bar click | Sets `throughputDrilldown` to the bucket object (with `.cards` array), hides pipeline |
+| Throughput period change | Clears `throughputDrilldown` |
+| Done KPI card click | Sets `doneDrilldown = true`, clears throughput drilldown |
+| Pipeline Table cell click | Calls `handlePipelineTableDrilldown`: sets list filter + search to match the clicked MC/status/lane, switches to list view (or done drilldown for Done status cells) |
+| Compact toggle | Toggles `pipelineCompact` — compact shows one column per status, full shows category + sub-status columns |
+| Type filter (All/Work/Process) | Filters KPI counts, active cards, done cards, throughput data simultaneously |
 
 ---
 
@@ -744,7 +971,7 @@ Build in this exact sequence. Each step should work before moving on.
 7. **Google OAuth** — Add GIS script tag, implement `src/api/google.js`, wire up Connect button in Settings, verify token is stored after auth
 8. **Ares page** — Port full `Project.jsx`, replacing API imports and localStorage calls, verify boards load and data renders
 9. **Config guard** — Add missing-config check to Ares page, verify redirect to Settings when unconfigured
-10. **Export features** — Verify PNG chart export and CSV pipeline export work in browser
+10. **Export features** — Verify PNG chart export, PNG table export, and CSV pipeline export work in browser
 11. **GitHub Actions** — Set up deploy workflow, push to main, verify live site at `https://{user}.github.io/ares-dashboard/`
 
 ---
