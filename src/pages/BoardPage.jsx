@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -10,7 +10,6 @@ import {
 } from 'lucide-react'
 import {
   boardCards, boardMovements, boardSummary,
-  cycleTime, listRaintoolProjects,
 } from '../api/ares'
 import { useAccess } from '../context/AccessContext'
 import Spinner from '../components/Spinner'
@@ -60,24 +59,42 @@ const LANE_MAP = {
   'Cancelled':             { type: 'archived', status: 'Cancelled' },
 }
 
-const DIST_COLORS  = {
+const DIST_COLORS = {
   backlog: '#6b7280', ready: '#3b82f6', wip: '#a855f7',
   review:  '#f59e0b', blocked: '#ef4444', done: '#10b981', archived: '#374151',
 }
 const STATUS_ORDER       = ['backlog', 'ready', 'wip', 'review', 'blocked', 'done', 'archived']
 const PROCESS_COL_GROUPS = ['wip', 'review', 'blocked']
 
+
+// ─── Pagination helper ────────────────────────────────────────────────────────
+
+// Fetches all pages from a paginated endpoint, returning a flat array of all items.
+// apiFn must match the signature (boardId, params) => Promise<{ data, meta }>
+async function fetchAllPages(apiFn, boardId, baseParams = {}) {
+  let page = 1
+  const allData = []
+  while (true) {
+    const result = await apiFn(boardId, { ...baseParams, page, pageSize: 200 })
+    const batch = Array.isArray(result?.data) ? result.data : []
+    allData.push(...batch)
+    const pg = result?.meta?.pagination
+    if (!pg || page >= pg.totalPages) break
+    page++
+  }
+  return allData
+}
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function getDateRange(period) {
   const now = new Date()
   const end = now.toISOString().split('T')[0]
   let start
-  if      (period === '7d')  { const d = new Date(now); d.setDate(d.getDate() - 7);         start = d.toISOString().split('T')[0] }
-  else if (period === '30d') { const d = new Date(now); d.setDate(d.getDate() - 30);        start = d.toISOString().split('T')[0] }
-  else if (period === '90d') { const d = new Date(now); d.setDate(d.getDate() - 90);        start = d.toISOString().split('T')[0] }
-  else if (period === '6m')  { const d = new Date(now); d.setMonth(d.getMonth() - 6);      start = d.toISOString().split('T')[0] }
-  else if (period === '1y')  { const d = new Date(now); d.setFullYear(d.getFullYear() - 1); start = d.toISOString().split('T')[0] }
+  if      (period === '7d')  { const d = new Date(now); d.setDate(d.getDate() - 7);          start = d.toISOString().split('T')[0] }
+  else if (period === '30d') { const d = new Date(now); d.setDate(d.getDate() - 30);         start = d.toISOString().split('T')[0] }
+  else if (period === '90d') { const d = new Date(now); d.setDate(d.getDate() - 90);         start = d.toISOString().split('T')[0] }
+  else if (period === '6m')  { const d = new Date(now); d.setMonth(d.getMonth() - 6);        start = d.toISOString().split('T')[0] }
+  else if (period === '1y')  { const d = new Date(now); d.setFullYear(d.getFullYear() - 1);  start = d.toISOString().split('T')[0] }
   else start = '2020-01-01'
   return { start, end }
 }
@@ -87,7 +104,8 @@ function fmtDateShort(iso) {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-// API returns currentList (not list_name / listName / list)
+
+// API returns currentList as the list field name
 function extractList(card) {
   return card?.currentList || card?.list_name || card?.listName || card?.list || ''
 }
@@ -102,6 +120,7 @@ function getPeriodKey(iso, granularity) {
   if (granularity === 'month') {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
   }
+  // ISO week
   const tmp = new Date(d)
   tmp.setHours(0, 0, 0, 0)
   tmp.setDate(tmp.getDate() + 3 - ((tmp.getDay() + 6) % 7))
@@ -122,16 +141,19 @@ function formatPeriodLabel(key, granularity) {
   return mon.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-function aggregateThroughput(movements, granularity) {
-  const map = {}
-  for (const m of movements) {
-    // API uses camelCase — toList is the most likely field name
-    const toList = m.toList || m.to_list || m.toLane || ''
-    if (LANE_MAP[toList]?.type !== 'done') continue
-    // API date field: try camelCase first, then snake_case
-    const date = m.movedAt || m.date || m.moved_at || m.timestamp
-    if (!date) continue
-    const key = getPeriodKey(date, granularity)
+
+// Buckets done cards by dateLastActivity within the optional [dateFrom, dateTo] window.
+function aggregateThroughput(doneCards, granularity, dateFrom, dateTo) {
+  const from = dateFrom ? new Date(dateFrom) : null
+  const to   = dateTo   ? new Date(dateTo + 'T23:59:59') : null
+  const map  = {}
+  for (const c of doneCards) {
+    const dateStr = c.dateLastActivity || c.updatedAt || c.due
+    if (!dateStr) continue
+    const d = new Date(dateStr)
+    if (from && d < from) continue
+    if (to   && d > to)   continue
+    const key = getPeriodKey(dateStr, granularity)
     map[key] = (map[key] || 0) + 1
   }
   return Object.keys(map).sort().map(k => ({ period: k, label: formatPeriodLabel(k, granularity), count: map[k] }))
@@ -157,26 +179,16 @@ function exportTableAsCsv(rows, headers, filename) {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function StatusDistBar({ counts }) {
-  const total = Object.values(counts).reduce((s, v) => s + v, 0)
-  if (!total) return null
-  return (
-    <div className="flex h-2 rounded-full overflow-hidden w-full">
-      {STATUS_ORDER.filter(s => counts[s]).map(s => (
-        <div key={s} title={`${s}: ${counts[s]}`}
-          style={{ width: `${(counts[s] / total) * 100}%`, background: DIST_COLORS[s] }} />
-      ))}
-    </div>
-  )
-}
-
-function KpiCard({ icon: Icon, label, value, sub, color = 'text-text-primary' }) {
+function KpiCard({ icon: Icon, label, value, sub, color = 'text-text-primary', loading }) {
   return (
     <div className="bg-surface border border-border rounded-xl p-4 flex flex-col gap-1">
       <div className="flex items-center gap-2 text-text-muted text-xs mb-1">
         {Icon && <Icon size={13} />}{label}
       </div>
-      <div className={`text-2xl font-semibold ${color}`}>{value ?? '—'}</div>
+      {loading
+        ? <div className="h-8 w-16 bg-white/5 rounded animate-pulse" />
+        : <div className={`text-2xl font-semibold ${color}`}>{value ?? '—'}</div>
+      }
       {sub && <div className="text-xs text-text-muted">{sub}</div>}
     </div>
   )
@@ -254,19 +266,20 @@ function TargetsPanel({ targets, setTargets, boardId }) {
   )
 }
 
-function ThroughputSection({ movements, boardId }) {
-  const [gran, setGran]       = useState('week')
+function ThroughputSection({ doneCards, boardId, dateFrom, dateTo }) {
+  const [gran,    setGran]    = useState('week')
   const [showTgt, setShowTgt] = useState(false)
   const [targets, setTargets] = useState(() => {
     const raw = localStorage.getItem(`targets_${boardId}`)
     return raw ? JSON.parse(raw) : []
   })
+
   useEffect(() => {
     const raw = localStorage.getItem(`targets_${boardId}`)
     setTargets(raw ? JSON.parse(raw) : [])
   }, [boardId])
 
-  const data = aggregateThroughput(movements, gran).map(p => ({
+  const data = aggregateThroughput(doneCards, gran, dateFrom, dateTo).map(p => ({
     ...p,
     target: computeTargetForPeriod(targets, p.period, gran),
   }))
@@ -342,36 +355,6 @@ function PipelineDistribution({ cards }) {
   )
 }
 
-function PipelineTableView({ cards, onExport }) {
-  const groups = {}
-  for (const c of cards) {
-    const l = extractList(c)
-    if (!groups[l]) groups[l] = []
-    groups[l].push(c)
-  }
-  return (
-    <SectionCard title="Pipeline by List"
-      action={<button className="btn-secondary py-1" onClick={onExport}><Download size={13} /> CSV</button>}>
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead><tr className="text-text-muted border-b border-border">
-            <th className="text-left py-1.5 pr-3">List</th>
-            <th className="text-right py-1.5">Cards</th>
-          </tr></thead>
-          <tbody>
-            {Object.entries(groups).sort(([a], [b]) => a.localeCompare(b)).map(([l, cs]) => (
-              <tr key={l} className="border-b border-border/50">
-                <td className="py-1.5 pr-3 text-text-primary">{l}</td>
-                <td className="py-1.5 text-right text-text-muted">{cs.length}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </SectionCard>
-  )
-}
-
 function CardsTable({ cards }) {
   const [search, setSearch] = useState('')
   const [page,   setPage]   = useState(0)
@@ -383,7 +366,7 @@ function CardsTable({ cards }) {
   const paged = filtered.slice(page * PAGE, page * PAGE + PAGE)
   const pages = Math.ceil(filtered.length / PAGE)
   return (
-    <SectionCard title={`Cards (${filtered.length})`}>
+    <SectionCard title={`Active Cards (${filtered.length})`}>
       <input className="input mb-3 text-xs" placeholder="Search cards…" value={search}
         onChange={e => { setSearch(e.target.value); setPage(0) }} />
       <div className="overflow-x-auto">
@@ -415,70 +398,19 @@ function CardsTable({ cards }) {
   )
 }
 
-function CycleTimeSection({ rtProjects }) {
-  const [rtId,    setRtId]    = useState('')
-  const [data,    setData]    = useState([])
-  const [loading, setLoading] = useState(false)
-  const [error,   setError]   = useState(null)
-
-  async function load() {
-    if (!rtId) return
-    setLoading(true); setError(null)
-    try {
-      const { data: rows } = await cycleTime(rtId)
-      setData(rows || [])
-    } catch (e) {
-      setError(e.message)
-    } finally { setLoading(false) }
-  }
-
-  const avg = data.length
-    ? (data.reduce((s, d) => s + (d.cycleTime || d.cycle_time || 0), 0) / data.length).toFixed(1)
-    : null
-
-  return (
-    <SectionCard title="Cycle Time">
-      <div className="flex gap-2 mb-4 flex-wrap items-end">
-        <select className="input text-xs py-1 w-56" value={rtId} onChange={e => setRtId(e.target.value)}>
-          <option value="">Select Raintool project…</option>
-          {rtProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
-        <button className="btn-primary py-1" onClick={load} disabled={!rtId || loading}>
-          {loading ? <Spinner size={12} /> : 'Load'}
-        </button>
-      </div>
-      {error && <p className="text-xs text-red-400 mb-2">{error}</p>}
-      {avg   && <p className="text-xs text-text-muted mb-3">Avg: <span className="text-text-primary font-medium">{avg} days</span></p>}
-      {data.length > 0 && (
-        <div className="h-40">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data.slice(0, 40)} margin={{ top: 4, right: 8, bottom: 4, left: -16 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-              <XAxis dataKey="name" tick={false} />
-              <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} />
-              <Tooltip content={<ThroughputTooltip />} />
-              <Bar dataKey="cycleTime" name="Days" fill="#a855f7" radius={[2, 2, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-    </SectionCard>
-  )
-}
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function BoardPage() {
-  const { boardId }                                     = useParams()
+  const { boardId }                                         = useParams()
   const { admin, accessibleIds, config, loading: accessLoading } = useAccess()
-  const { toasts, toast, dismiss }                      = useToast()
+  const { toasts, toast, dismiss }                          = useToast()
 
   const [configMissing, setConfigMissing] = useState(false)
   const [boardName,  setBoardName]  = useState(() => config?.boards?.[boardId]?.name || '')
   const [period,     setPeriod]     = useState('30d')
-  const [cards,      setCards]      = useState([])
+  const [cards,      setCards]      = useState([])      // active cards
+  const [doneCards,  setDoneCards]  = useState([])      // done cards (all time)
   const [movements,  setMovements]  = useState([])
-  const [rtProjects, setRtProjects] = useState([])
   const [loading,    setLoading]    = useState(false)
   const [error,      setError]      = useState(null)
 
@@ -497,17 +429,19 @@ export default function BoardPage() {
     setLoading(true); setError(null)
     const { start, end } = getDateRange(period)
     try {
-      const [c, m, s] = await Promise.all([
-        // Cards: fetch active cards (no date range — API doesn't support it)
-        // Use pageSize=200 to maximise results in one request
-        boardCards(boardId, { status: 'active', pageSize: 200 }),
-        // Movements: API uses dateFrom / dateTo (not start_date / end_date)
-        boardMovements(boardId, { dateFrom: start, dateTo: end, pageSize: 200 }),
+      const [activeCards, doneFetched, movs, s] = await Promise.all([
+        // Active cards: paginate all pages
+        fetchAllPages(boardCards, boardId, { status: 'active' }),
+        // Done cards: paginate all pages
+        fetchAllPages(boardCards, boardId, { status: 'done' }),
+        // Movements: paginate within the selected date range
+        fetchAllPages(boardMovements, boardId, { dateFrom: start, dateTo: end }),
         boardSummary(boardId).catch(() => null),
       ])
-      setCards(c.data     || [])
-      setMovements(m.data || [])
-      // Board name from summary — API likely returns projectName
+      setCards(activeCards)
+      setDoneCards(doneFetched)
+      setMovements(movs)
+
       if (s) {
         const name = s.projectName || s.name || s.boardName || s.board_name
         if (name) setBoardName(name)
@@ -520,14 +454,16 @@ export default function BoardPage() {
 
   useEffect(() => { if (!configMissing) loadData() }, [boardId, period, configMissing])
 
-  useEffect(() => {
-    if (!configMissing) listRaintoolProjects().then(setRtProjects).catch(() => {})
-  }, [configMissing])
 
   const hasAccess = admin || accessibleIds.has(boardId)
 
-  // Derived KPIs
-  const doneCount    = movements.filter(m => LANE_MAP[m.toList || m.to_list || '']?.type === 'done').length
+  // Derived KPIs from done cards + active cards
+  const { start: periodStart, end: periodEnd } = getDateRange(period)
+  const doneInPeriod = doneCards.filter(c => {
+    const d = c.dateLastActivity || c.updatedAt || c.due
+    if (!d) return false
+    return d >= periodStart && d <= periodEnd + 'T23:59:59'
+  })
   const wipCount     = cards.filter(c => PROCESS_COL_GROUPS.includes(LANE_MAP[extractList(c)]?.type)).length
   const blockedCount = cards.filter(c => LANE_MAP[extractList(c)]?.type === 'blocked').length
 
@@ -592,22 +528,25 @@ export default function BoardPage() {
         ? <div className="flex items-center justify-center gap-2 mt-6 text-text-muted text-sm"><Spinner size={16} /> Loading…</div>
         : (
           <div className="p-4 flex flex-col gap-4">
+            {/* KPI row */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <KpiCard icon={TrendingUp}    label="Throughput"  value={doneCount}    sub="completed in period" color="text-emerald-400" />
-              <KpiCard icon={Users}         label="WIP"         value={wipCount}     sub="in progress / review" color="text-purple-400" />
-              <KpiCard icon={AlertTriangle} label="Blocked"     value={blockedCount} sub="blocked cards"
+              <KpiCard icon={TrendingUp}    label="Done (period)"  value={doneInPeriod.length}  sub={`last ${period}`}              color="text-emerald-400" />
+              <KpiCard icon={Tag}           label="Done (total)"   value={doneCards.length}     sub="all time"                       color="text-emerald-300" />
+              <KpiCard icon={Users}         label="WIP"            value={wipCount}              sub="in progress / review"          color="text-purple-400" />
+              <KpiCard icon={AlertTriangle} label="Blocked"        value={blockedCount}          sub="blocked cards"
                 color={blockedCount > 0 ? 'text-red-400' : 'text-text-primary'} />
-              <KpiCard icon={Tag}           label="Active Cards" value={cards.length} sub="currently active" />
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <ThroughputSection movements={movements} boardId={boardId} />
-              <PipelineDistribution cards={cards} />
-            </div>
+            {/* Throughput (driven by done cards, filtered to selected period) */}
+            <ThroughputSection
+              doneCards={doneCards}
+              boardId={boardId}
+              dateFrom={periodStart}
+              dateTo={periodEnd}
+            />
 
-            <PipelineTableView cards={cards} onExport={exportPipeline} />
+            {/* Active cards table */}
             <CardsTable cards={cards} />
-            <CycleTimeSection rtProjects={rtProjects} />
           </div>
         )
       }
