@@ -66,6 +66,7 @@ const DIST_COLORS = {
 const STATUS_ORDER       = ['backlog', 'ready', 'wip', 'review', 'blocked', 'done', 'archived']
 const PROCESS_COL_GROUPS = ['wip', 'review', 'blocked']
 
+
 // ─── Pagination helper ────────────────────────────────────────────────────────
 
 // Fetches all pages from a paginated endpoint, returning a flat array of all items.
@@ -83,7 +84,6 @@ async function fetchAllPages(apiFn, boardId, baseParams = {}) {
   }
   return allData
 }
-
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function getDateRange(period) {
@@ -103,6 +103,7 @@ function fmtDateShort(iso) {
   if (!iso) return ''
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
+
 
 // API returns currentList as the list field name
 function extractList(card) {
@@ -139,6 +140,7 @@ function formatPeriodLabel(key, granularity) {
   mon.setDate(jan4.getDate() - ((jan4.getDay() + 6) % 7) + (+w - 1) * 7)
   return mon.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
+
 
 // Buckets done cards by dateLastActivity within the optional [dateFrom, dateTo] window.
 function aggregateThroughput(doneCards, granularity, dateFrom, dateTo) {
@@ -325,6 +327,34 @@ function ThroughputSection({ doneCards, boardId, dateFrom, dateTo }) {
   )
 }
 
+function PipelineDistribution({ cards }) {
+  const counts = {}
+  for (const c of cards) {
+    const t = LANE_MAP[extractList(c)]?.type || 'backlog'
+    counts[t] = (counts[t] || 0) + 1
+  }
+  const total = Object.values(counts).reduce((s, v) => s + v, 0)
+  return (
+    <SectionCard title="Pipeline Distribution">
+      <StatusDistBar counts={counts} />
+      <div className="flex flex-col gap-2 mt-3">
+        {STATUS_ORDER.filter(s => counts[s]).map(s => {
+          const pct = total ? (counts[s] / total * 100) : 0
+          return (
+            <div key={s} className="flex items-center gap-2 text-xs">
+              <span className="w-20 text-text-muted capitalize">{s}</span>
+              <div className="flex-1 h-1.5 bg-bg rounded-full overflow-hidden">
+                <div style={{ width: `${pct}%`, background: DIST_COLORS[s] }} className="h-full rounded-full" />
+              </div>
+              <span className="w-8 text-right text-text-muted">{counts[s]}</span>
+            </div>
+          )
+        })}
+      </div>
+    </SectionCard>
+  )
+}
+
 function CardsTable({ cards }) {
   const [search, setSearch] = useState('')
   const [page,   setPage]   = useState(0)
@@ -411,6 +441,7 @@ export default function BoardPage() {
       setCards(activeCards)
       setDoneCards(doneFetched)
       setMovements(movs)
+
       if (s) {
         const name = s.projectName || s.name || s.boardName || s.board_name
         if (name) setBoardName(name)
@@ -422,6 +453,7 @@ export default function BoardPage() {
   }, [boardId, period, configMissing])
 
   useEffect(() => { if (!configMissing) loadData() }, [boardId, period, configMissing])
+
 
   const hasAccess = admin || accessibleIds.has(boardId)
 
