@@ -1,17 +1,20 @@
 import { NavLink } from 'react-router-dom'
-import { useState, useEffect } from 'react'
-import { Settings, ShieldCheck, ChevronLeft, ChevronRight, LayoutDashboard } from 'lucide-react'
+import { useState, useEffect, useMemo } from 'react'
+import {
+  Settings, ShieldCheck, ChevronLeft, ChevronRight,
+  LayoutDashboard,
+} from 'lucide-react'
 import { useAccess } from '../context/AccessContext'
 import { listBoards } from '../api/ares'
 import Spinner from './Spinner'
+
+// ─── Sidebar ──────────────────────────────────────────────────────────────────
 
 export default function Sidebar() {
   const [collapsed,     setCollapsed]     = useState(false)
   const [apiBoards,     setApiBoards]     = useState([])
   const [boardsLoading, setBoardsLoading] = useState(false)
 
-  // canAdmin is true in bootstrap mode (no admins set yet) for any logged-in user,
-  // as well as for established admins — so the Admin link is always reachable.
   const { admin, canAdmin, accessibleIds, loading: configLoading } = useAccess()
 
   useEffect(() => {
@@ -22,13 +25,24 @@ export default function Sidebar() {
     listBoards().then(setApiBoards).catch(() => {}).finally(() => setBoardsLoading(false))
   }, [])
 
-  const visibleBoards = apiBoards.filter(b => {
-    const id = b.id || b.boardId
-    return admin || accessibleIds.has(id)
-  })
+  const hiddenIds = useMemo(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('hidden_board_ids') || '[]')) }
+    catch { return new Set() }
+  }, [])
+
+  const visibleBoards = useMemo(() => {
+    const seen = new Set()
+    return apiBoards.filter(b => {
+      const id = b.id || b.boardId
+      if (!id || seen.has(id)) return false
+      seen.add(id)
+      if (hiddenIds.has(id)) return false
+      return admin || accessibleIds.has(id)
+    })
+  }, [apiBoards, admin, accessibleIds, hiddenIds])
 
   const STATIC_NAV = [
-    { to: '/settings', label: 'Settings',     Icon: Settings   },
+    { to: '/settings', label: 'Settings', Icon: Settings   },
     ...(canAdmin ? [{ to: '/admin', label: 'Admin', Icon: ShieldCheck }] : []),
   ]
 
@@ -66,19 +80,20 @@ export default function Sidebar() {
             : visibleBoards.map(b => {
                 const id = b.id || b.boardId
                 return (
-                  <NavLink
+                      <NavLink
                     key={id}
                     to={`/board/${id}`}
+                    end
                     className={({ isActive }) =>
-                      `flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-colors ${
-                        isActive
-                          ? 'text-text-primary bg-accent/10 font-medium'
-                          : 'text-text-muted hover:text-text-primary hover:bg-white/5'
-                      }`
+                      `flex items-center gap-2.5 rounded-lg text-sm transition-colors px-2.5 py-2
+                       ${isActive
+                         ? 'text-text-primary bg-accent/10 font-medium'
+                         : 'text-text-muted hover:text-text-primary hover:bg-white/5'
+                       }`
                     }
                   >
                     <LayoutDashboard size={13} className="shrink-0" />
-                    {!collapsed && <span className="truncate">{b.name || b.boardName}</span>}
+                    {!collapsed && <span className="truncate">{b.name}</span>}
                   </NavLink>
                 )
               })

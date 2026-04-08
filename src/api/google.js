@@ -1,11 +1,5 @@
-const SCOPES = [
-  'openid',
-  'email',
-  'profile',
-  'https://mail.google.com/',
-  'https://www.googleapis.com/auth/drive',
-  'https://www.googleapis.com/auth/calendar.readonly',
-].join(' ')
+// Identity-only scopes — we only need to know who the user is
+const SCOPES = 'openid email profile'
 
 export function isGoogleConfigured() {
   return !!localStorage.getItem('google_client_id')

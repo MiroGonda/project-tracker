@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(pip install:*)",
+      "Bash(python -c \"import fastapi, uvicorn, httpx, dotenv; print\\('all imports OK'\\)\")",
+      "Bash(python -c \"import main; print\\('main.py parsed OK'\\)\")",
+      "Bash(python -c \"import main; print\\('main.py parsed OK, routes:', [r.path for r in main.app.routes]\\)\")"
+    ]
+  }
+}

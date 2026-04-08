@@ -1,10 +1,24 @@
-# CLAUDE.md — Ares Project Tracker
+# CLAUDE.md — Project Tracker
+
+## GitHub Agent Briefing
+
+This document is the primary briefing for any agent operating on this repository. Key facts before you touch anything:
+
+- **Live site:** `https://mirogonda.github.io/project-tracker/` — it must stay live. Never push broken builds to `main`.
+- **Deploy trigger:** Every push to `main` runs `.github/workflows/deploy.yml` (Vite build → GitHub Pages). Verify `npm run build` succeeds before pushing.
+- **No backend in this repo.** The frontend is a pure SPA. All state is `localStorage`. The only exception is the Utilization tab, which calls an external backend proxy for Runn data (see Utilization section below).
+- **Access control bootstrap:** `public/access-config.json` drives role-based access. If `"admins": []`, any authenticated Google user can self-assign as admin via `/admin`. Do not overwrite this file with dummy data.
+- **Routing:** `BrowserRouter basename="/project-tracker"` + `vite.config.js base: '/project-tracker/'`. Both must stay in sync or the GitHub Pages deploy will 404.
+- **SPA 404 fallback:** `dist/404.html` must be a copy of `dist/index.html`. The Vite config handles this via a build plugin — do not remove it.
+- **Auth:** Google Identity Services (GIS), browser-only. The `google_client_id` is entered by the user in Settings and stored in `localStorage`. There is no server-side session.
+
+---
 
 ## What This Project Is
 
-A **pure-frontend SPA** that provides per-project dashboards for an Ares/Trello pipeline. Each project board gets its own dedicated page (`/board/:boardId`) with throughput charts, KPI cards, and a filterable card pipeline.
+A **pure-frontend SPA** that provides per-project dashboards for an Ares/Trello pipeline. Each project board gets its own dedicated page (`/board/:boardId`) with throughput charts, KPI cards, a filterable card pipeline, and a resource utilization tab.
 
-There is **no backend**. All data is fetched directly from the Ares API in the browser. All state is stored in `localStorage`.
+There is **no backend bundled with this repo**. All Ares/Trello data is fetched directly from the Ares API in the browser. All state is stored in `localStorage`. The one exception is the Utilization tab — see below.
 
 ---
 
@@ -52,8 +66,10 @@ The site is a React + Vite SPA with:
 | `src/pages/BoardPage.jsx` | Per-project dashboard (main work area) |
 | `src/pages/Settings.jsx` | API credentials, Google OAuth, theme toggle |
 | `src/pages/Admin.jsx` | Access control — assign users to boards |
+| `src/pages/UtilizationTab.jsx` | Org-wide resource utilization report (tab inside BoardPage) |
 | `src/components/Sidebar.jsx` | Nav sidebar — lists all boards the user can access |
 | `src/api/ares.js` | Ares API client — reads host/key from localStorage |
+| `src/api/runn.js` | Utilization API wrapper — calls backend proxy, not Runn directly |
 | `src/api/access.js` | Access config helpers (admin, canAdmin, accessibleIds) |
 | `src/api/google.js` | Google GIS OAuth wrapper |
 | `src/context/AccessContext.jsx` | Provides role/access state app-wide |
@@ -71,6 +87,32 @@ The site is a React + Vite SPA with:
   - Field: `currentList` (not `list_name` or `listName`)
 - **Movements:** `GET /boards/:boardId/movements?dateFrom=YYYY-MM-DD&dateTo=YYYY-MM-DD&page=N&pageSize=200`
 - **CORS:** The Ares server must include `Access-Control-Allow-Origin` on ALL responses (including 4xx). The Nginx config must use the `always` flag.
+- **No write access to Ares server** — it is a consumed service, not owned infrastructure.
+
+---
+
+## Utilization Tab — Backend Required
+
+The Utilization tab (`/board/:boardId` → Utilization tab) shows org-wide Runn data: capacity, scheduled hours, and actual (timesheet) hours per person.
+
+**Why a backend is needed:** Runn's API intentionally blocks browser requests (no CORS headers). The frontend cannot call Runn directly.
+
+**Architecture:**
+```
+Browser → GET /api/runn/utilization?startDate=...&endDate=...
+               ↓
+         Backend proxy (Cloudflare Worker, Vercel Function, etc.)
+               ↓ (server-side, no CORS)
+         Runn API — 6 parallel calls
+               ↓
+         Pre-computed JSON response → frontend renders
+```
+
+**Backend endpoint spec:** `.referenceMaterials/utilization-rebuild.md` — full computation logic, API calls, response shape.
+
+**Frontend config:** Settings → "Utilization API URL" — stored in `localStorage` as `util_api_url`. The frontend calls `${util_api_url}/api/runn/utilization?startDate=...&endDate=...`.
+
+**The Runn API key is stored server-side** in the backend's environment variables (`.env`), never in the browser.
 
 ---
 
@@ -88,46 +130,14 @@ If `public/access-config.json` has `"admins": []`, any logged-in Google user can
 
 ---
 
-## Current Development Branch
-
-Active feature branch: `claude/review-project-requirements-s1Dbr`
-
-All dashboard improvements go here first, then merge to `main` to deploy.
-
----
-
-## Next Steps
+## Next Steps (Pending)
 
 The following improvements are pending implementation in `src/pages/BoardPage.jsx`:
 
 1. **Rename "Active Cards" → "Pipeline"**
-   The cards section title and section heading should say "Pipeline", not "Active Cards".
-
-2. **Work / Process card categorization**
-   Classify each active card as **Work** or **Process** based on its `currentList`:
-   - **Work** = lanes where internal production is happening (`wip`, `review` types in `LANE_MAP`)
-   - **Process** = lanes in client-facing / external stages (`blocked`, `ready`, `backlog` types)
-   Display a colored type pill (e.g. indigo = Work, purple = Process) on each card row in the Pipeline.
-
-3. **Pipeline filters (and filter-driven metrics)**
-   Add a filter bar above the Pipeline table:
-   - Text search (by card name or list)
-   - Multi-select dropdown: filter by **List**
-   - Multi-select dropdown: filter by **Label**
-   - Toggle buttons: **All / Work / Process**
-   All active filters must flow upward and update:
-   - WIP count KPI
-   - Blocked count KPI
-   - Done (period) KPI and Done (total) KPI
-   - Throughput chart (use filtered done cards)
-
-4. **Done drilldown panel**
-   Clicking either Done KPI card replaces the Pipeline section with a **Done Cards** view:
-   - Green-tinted section header/border (`emerald`)
-   - Shows done cards in a table (same columns as Pipeline)
-   - Has a "← Back to Pipeline" button to dismiss
-   The Throughput chart and KPI row remain visible above.
-
+2. **Work / Process card categorization** — classify by `currentList` via `LANE_MAP`
+3. **Pipeline filters** — text search, multi-select List/Label dropdowns, Work/Process toggles; filters drive WIP/Blocked/Done KPIs and Throughput chart
+4. **Done drilldown panel** — clicking Done KPI replaces Pipeline with a Done Cards view
 5. **Daily granularity in Throughput chart**
-   Add a **Daily** option alongside Weekly and Monthly in the Throughput granularity selector.
-   The Throughput chart must use the **filtered done cards** (from step 3 above) so that changing the type/label/list filter updates the chart in real time.
+
+**Utilization backend:** A backend service needs to be deployed (Cloudflare Worker recommended) and the URL entered in Settings before the Utilization tab will load data.

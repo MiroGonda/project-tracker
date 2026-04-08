@@ -164,11 +164,15 @@ export default function Admin() {
     setDraft(d => { const next = { ...d.boards }; delete next[id]; return { ...d, boards: next } })
   }
 
-  const apiIds    = new Set(apiBoards.map(b => b.id))
+  const seen      = new Set()
+  const apiIds    = new Set()
+  for (const b of apiBoards) { if (b.id) apiIds.add(b.id) }
   const allBoards = [
-    ...apiBoards.map(b => ({ id: b.id, name: b.name })),
+    ...apiBoards
+      .filter(b => { if (!b.id || seen.has(b.id)) return false; seen.add(b.id); return true })
+      .map(b => ({ id: b.id, name: b.name })),
     ...Object.entries(draft.boards)
-      .filter(([id]) => !apiIds.has(id))
+      .filter(([id]) => !apiIds.has(id) && !seen.has(id))
       .map(([id, v]) => ({ id, name: v.name || id })),
   ]
 
