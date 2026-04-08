@@ -2980,6 +2980,7 @@ export default function BoardPage() {
   const [loading,          setLoading]          = useState(false)
   const [error,         setError]         = useState(null)
   const [lastRefreshed, setLastRefreshed] = useState(null)
+  const [utilRefresh,   setUtilRefresh]   = useState(0)
 
   // Date range
   const [dateRange,    setDateRange]    = useState(30)      // 7 | 30
@@ -3611,7 +3612,7 @@ export default function BoardPage() {
                   </div>
                 )}
               </div>
-              <button className="btn-secondary py-1" onClick={() => loadData(true)} disabled={loading}>
+              <button className="btn-secondary py-1" onClick={() => { loadData(true); setUtilRefresh(n => n + 1) }} disabled={loading}>
                 <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
               </button>
             </div>
@@ -3658,7 +3659,7 @@ export default function BoardPage() {
         const { dateFrom: df, dateTo: dt } = getEffectiveDateRange(dateRange, customRange)
         return (
           <div className={activeTab !== 'utilization' ? 'hidden' : ''}>
-            <UtilizationTab boardId={boardId} dateFrom={df} dateTo={dt} />
+            <UtilizationTab boardId={boardId} dateFrom={df} dateTo={dt} forceRefresh={utilRefresh} />
           </div>
         )
       })()}

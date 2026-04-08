@@ -17,6 +17,7 @@ The Runn API key can be supplied two ways (first wins):
 
 import asyncio
 import os
+import time
 from collections import defaultdict
 from datetime import date
 
@@ -51,6 +52,16 @@ def _headers(api_key: str) -> dict:
         "Authorization":  f"Bearer {api_key}",
         "accept-version": "1.0.0",
     }
+
+
+# ─── In-memory cache ─────────────────────────────────────────────────────────
+
+_UTIL_CACHE: dict = {}          # key → { "data": ..., "ts": float }
+_UTIL_CACHE_TTL = 30 * 60       # 30 minutes
+
+
+def _util_cache_key(startDate: str, endDate: str, projectId: int | None) -> str:
+    return f"{startDate}|{endDate}|{projectId}"
 
 
 # ─── App ──────────────────────────────────────────────────────────────────────
@@ -145,11 +156,13 @@ async def runn_utilization(
     startDate:  str       = Query(..., description="YYYY-MM-DD"),
     endDate:    str       = Query(..., description="YYYY-MM-DD"),
     projectId:  int | None = Query(None, description="Filter to a single Runn project"),
+    force:      bool      = Query(False, description="Bypass server-side cache"),
     x_runn_api_key: str | None = Header(None, alias="X-Runn-Api-Key"),
 ):
     """
     Pre-computed per-person utilization for the given date range.
     When projectId is provided the report is scoped to that project only.
+    Results are cached server-side for 30 minutes. Pass force=true to bypass.
 
     Response shape — utilization-rebuild.md § 9:
     { people: [...], period: { start, end, working_days }, summary: { ... } }
@@ -164,6 +177,13 @@ async def runn_utilization(
 
     if end < start:
         raise HTTPException(status_code=400, detail="endDate must be >= startDate.")
+
+    # ── Server-side cache check ───────────────────────────────────────────────
+    ck = _util_cache_key(startDate, endDate, projectId)
+    if not force:
+        entry = _UTIL_CACHE.get(ck)
+        if entry and (time.time() - entry["ts"]) < _UTIL_CACHE_TTL:
+            return entry["data"]
 
     async with httpx.AsyncClient(timeout=30) as client:
         people, contracts, assignments, all_assignments, actuals, roles, projects = await asyncio.gather(
@@ -303,7 +323,7 @@ async def runn_utilization(
         or (p["util_actual_pct"] == 0 and p["util_scheduled_pct"] > 100)
     )
 
-    return {
+    payload = {
         "people": result_people,
         "period": {"start": startDate, "end": endDate, "working_days": wdays},
         "summary": {
@@ -313,6 +333,8 @@ async def runn_utilization(
             "over_capacity_count": over_cap,
         },
     }
+    _UTIL_CACHE[ck] = {"data": payload, "ts": time.time()}
+    return payload
 
 
 # ─── Ares proxy ───────────────────────────────────────────────────────────────

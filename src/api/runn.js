@@ -25,11 +25,12 @@ export function isUtilApiConfigured() {
  * @param {string} endDate    YYYY-MM-DD
  * @param {number|null} projectId  Optional Runn project ID to scope the report
  */
-export async function getUtilization(startDate, endDate, projectId = null) {
+export async function getUtilization(startDate, endDate, projectId = null, force = false) {
   const base = getUtilApiBase()
   if (!base) throw new Error('Utilization API URL is not configured. Set it in Settings.')
   const params = { startDate, endDate }
   if (projectId != null) params.projectId = projectId
+  if (force) params.force = true
   const r = await axios.get(`${base}/api/runn/utilization`, {
     params,
     headers: authHeaders(),

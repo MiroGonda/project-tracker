@@ -18,11 +18,18 @@ function loadBoardProject(key, boardId) {
   try { return JSON.parse(localStorage.getItem(`${key}_${boardId}`) || 'null') } catch { return null }
 }
 
+const UTIL_CACHE_TTL = 30 * 60 * 1000 // 30 minutes
+
 function loadCache(boardId) {
-  try { return JSON.parse(localStorage.getItem(cacheKey(boardId)) || 'null') } catch { return null }
+  try {
+    const raw = JSON.parse(localStorage.getItem(cacheKey(boardId)) || 'null')
+    if (!raw) return null
+    if (Date.now() - (raw.cachedAt || 0) > UTIL_CACHE_TTL) return null
+    return raw
+  } catch { return null }
 }
 function saveCache(boardId, payload) {
-  try { localStorage.setItem(cacheKey(boardId), JSON.stringify(payload)) } catch { /* storage full */ }
+  try { localStorage.setItem(cacheKey(boardId), JSON.stringify({ ...payload, cachedAt: Date.now() })) } catch { /* storage full */ }
 }
 function loadStored(key) {
   try { return JSON.parse(localStorage.getItem(key) || 'null') } catch { return null }
@@ -384,7 +391,7 @@ function UtilChart({ rows, roleMapping, rtHoursMap }) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function UtilizationTab({ boardId, dateFrom, dateTo }) {
+export default function UtilizationTab({ boardId, dateFrom, dateTo, forceRefresh = 0 }) {
   const configured = isUtilApiConfigured()
 
   const [runnProject] = useState(() => loadBoardProject('runn_project', boardId))
@@ -409,11 +416,11 @@ export default function UtilizationTab({ boardId, dateFrom, dateTo }) {
 
   // ── Loaders ────────────────────────────────────────────────────────────────
 
-  const loadRunn = useCallback(async (proj = runnProject) => {
+  const loadRunn = useCallback(async (proj = runnProject, force = false) => {
     if (!configured) return
     setRunnLoading(true); setRunnError(null)
     try {
-      const result = await getUtilization(dateFrom, dateTo, proj?.id ?? null)
+      const result = await getUtilization(dateFrom, dateTo, proj?.id ?? null, force)
       setRunnData(result)
       saveCache(boardId, { data: result })
     } catch (e) {
@@ -442,11 +449,18 @@ export default function UtilizationTab({ boardId, dateFrom, dateTo }) {
     }
   }, [dateFrom, dateTo, rtProject])
 
-  // Auto-load on mount
+  // Auto-load on mount — use cache if fresh, otherwise fetch
   useEffect(() => {
     if (configured && !runnData) loadRunn()
     loadRt()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Triggered when parent's Refresh button is clicked (forceRefresh counter increments)
+  const isFirstRender = useRef(true)
+  useEffect(() => {
+    if (isFirstRender.current) { isFirstRender.current = false; return }
+    if (forceRefresh > 0) { loadRunn(runnProject, true); loadRt() }
+  }, [forceRefresh]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleMappingChange(role, resources) {
     const next = { ...roleMapping, [role]: resources }
