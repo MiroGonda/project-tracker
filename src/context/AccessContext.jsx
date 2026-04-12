@@ -1,20 +1,30 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { onAuthStateChanged } from 'firebase/auth'
+import { auth } from '../firebase'
 import {
   fetchAccessConfig, isAdmin, canAdminister,
-  getAccessibleBoardIds, saveAccessConfig,
+  getAccessibleBoardIds, saveAccessConfig, getUserBoardRole,
 } from '../api/access'
-import { getGoogleEmail, isGoogleConnected } from '../api/google'
 
 const AccessContext = createContext()
 
 export function AccessProvider({ children }) {
-  const [config,  setConfigState] = useState(null)
-  const [loading, setLoading]     = useState(true)
-  const [error,   setError]       = useState(null)
-  const [email,   setEmail]       = useState(() => isGoogleConnected() ? getGoogleEmail() : null)
+  const [config,    setConfigState] = useState(null)
+  const [configReady, setConfigReady] = useState(false)
+  const [authReady,   setAuthReady]   = useState(false)
+  const [error,     setError]       = useState(null)
+  const [email,     setEmail]       = useState(null)
+
+  // Track Firebase Auth state
+  useEffect(() => {
+    return onAuthStateChanged(auth, user => {
+      setEmail(user?.email || null)
+      setAuthReady(true)
+    })
+  }, [])
 
   const reload = useCallback(async () => {
-    setLoading(true)
+    setConfigReady(false)
     setError(null)
     try {
       const c = await fetchAccessConfig()
@@ -23,26 +33,26 @@ export function AccessProvider({ children }) {
       setError(e.message)
       setConfigState({ admins: [], boards: {} })
     } finally {
-      setLoading(false)
+      setConfigReady(true)
     }
   }, [])
 
   useEffect(() => { reload() }, [])
 
-  /** Call after Google connect/disconnect to re-evaluate permissions. */
-  const refreshEmail = useCallback(() => {
-    setEmail(isGoogleConnected() ? getGoogleEmail() : null)
-  }, [])
+  /** No-op: Firebase Auth state updates reactively via onAuthStateChanged. */
+  const refreshEmail = useCallback(() => {}, [])
 
-  /** Persist config change and update context state immediately. */
+  /** Optimistically update local state, then persist to Firestore. */
   const updateConfig = useCallback((next) => {
-    saveAccessConfig(next)
     setConfigState(next)
+    saveAccessConfig(next).catch(e => console.error('Failed to save config:', e))
   }, [])
 
+  const loading       = !authReady || !configReady
   const admin         = isAdmin(config, email)
   const canAdmin      = canAdminister(config, email)
   const accessibleIds = getAccessibleBoardIds(config, email)
+  const getBoardRole  = useCallback((boardId) => getUserBoardRole(config, email, boardId), [config, email])
 
   return (
     <AccessContext.Provider value={{
@@ -51,6 +61,7 @@ export function AccessProvider({ children }) {
       email, refreshEmail,
       admin, canAdmin,
       accessibleIds,
+      getBoardRole,
       reload,
     }}>
       {children}

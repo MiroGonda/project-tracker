@@ -405,10 +405,54 @@ function getPeriodBounds(key, period) {
 // Muted, dim palette — readable on dark backgrounds without being harsh
 const DIFF_COLORS = { easy: '#5a9e78', medium: '#b8893a', hard: '#b85c5c', unknown: '#6b7280' }
 
-function aggregateThroughput(doneCards, period, cutoff) {
+// ── Movement field extractors (Ares API field names vary) ─────────────────────
+function extractMovementToList(m) {
+  // Only use fields that unambiguously represent a move destination.
+  // Avoid m.list / m.currentList / m.to — those reflect the card's current state
+  // at event time and are set on ALL activity records, not just list moves.
+  return m.toList || m.listAfter || m.destinationList || ''
+}
+function extractMovementCardId(m) {
+  return m.cardId || m.card_id || m.cardid || null
+}
+function extractMovementDate(m) {
+  return m.movedAt || m.date || m.timestamp || m.createdAt || m.at ||
+         m.occurredAt || m.eventDate || m.action_date || m.moved_at || m.created_at || null
+}
+
+/**
+ * Builds a Map<cardId, dateStr> of when each card was last moved into a Done list.
+ * Cards created directly into Done (board setup/import) will not have movement records
+ * and are intentionally excluded — their dateLastActivity is unreliable as a completion date.
+ */
+function buildCompletionDateMap(movements) {
+  const map = new Map()
+  for (const m of movements) {
+    const toList = extractMovementToList(m)
+    if (LANE_MAP[toList]?.status !== 'Done') continue
+    const cardId  = extractMovementCardId(m)
+    const dateStr = extractMovementDate(m)
+    if (!cardId || !dateStr) continue
+    const existing = map.get(cardId)
+    if (!existing || new Date(dateStr) > new Date(existing)) {
+      map.set(cardId, dateStr)
+    }
+  }
+  return map
+}
+
+/**
+ * @param {Map} completionDateMap - from buildCompletionDateMap(movements).
+ *   If empty (no movement data at all), falls back to dateLastActivity.
+ */
+function aggregateThroughput(doneCards, period, cutoff, completionDateMap = new Map()) {
   const map = {}
   for (const c of doneCards) {
-    const dateStr = c.dateLastActivity || c.updatedAt || c.due
+    const cardId = c.id || c.cardId
+    // Prefer movement-confirmed completion date; fall back only when no movement data exists
+    const dateStr = completionDateMap.size > 0
+      ? completionDateMap.get(cardId)
+      : (c.dateLastActivity || c.updatedAt || c.due)
     if (!dateStr) continue
     const d = new Date(dateStr)
     if (cutoff && d < cutoff) continue
@@ -717,7 +761,7 @@ function TargetsPanel({ targets, setTargets, boardId, onClose }) {
   )
 }
 
-function ThroughputSection({ doneCards, allDoneCards, boardId, cutoff, onBarClick, allowedPeriods, view, onViewChange }) {
+function ThroughputSection({ doneCards, allDoneCards, boardId, cutoff, onBarClick, allowedPeriods, view, onViewChange, completionDateMap = new Map() }) {
   const [period,  setPeriod]  = useState('daily')
   const [showTgt, setShowTgt] = useState(false)
   const [targets, setTargets] = useState(() => {
@@ -735,17 +779,17 @@ function ThroughputSection({ doneCards, allDoneCards, boardId, cutoff, onBarClic
     if (!allowedPeriods.includes(period)) setPeriod(allowedPeriods[0])
   }, [allowedPeriods])
 
-  const data = useMemo(() => aggregateThroughput(doneCards, period, cutoff).map(p => ({
+  const data = useMemo(() => aggregateThroughput(doneCards, period, cutoff, completionDateMap).map(p => ({
     ...p,
     target: computeTargetForPeriod(p.key, period, targets),
-  })), [doneCards, period, cutoff, targets])
+  })), [doneCards, period, cutoff, completionDateMap, targets])
 
   const yMax = useMemo(() => {
     const src = allDoneCards?.length ? allDoneCards : doneCards
-    const allData = aggregateThroughput(src, period, cutoff)
+    const allData = aggregateThroughput(src, period, cutoff, completionDateMap)
     const max = Math.max(...allData.map(d => d.total), 1)
     return Math.ceil(max * 1.2)
-  }, [allDoneCards, doneCards, period, cutoff])
+  }, [allDoneCards, doneCards, period, cutoff, completionDateMap])
 
   const hasTargets = targets.length > 0
   const PERIOD_LABELS = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly' }
@@ -1970,22 +2014,47 @@ function progressColor(pct) {
   return '#e8e8e8'
 }
 
-function computeRequestProgress(req, cards, doneCards) {
+function computeRequestProgress(req, cards, doneCards, targets = []) {
   const ids = req.attachedCardIds
   if (!ids?.length) return null
   const idSet = new Set(ids)
-  let total = 0, done = 0
-  for (const c of doneCards) {
-    if (idSet.has(c.id || c.cardId)) { total++; done++ }
+
+  const attachedDone   = doneCards.filter(c => idSet.has(c.id || c.cardId))
+  const attachedActive = cards.filter(c => idSet.has(c.id || c.cardId))
+  const allAttached    = [...attachedDone, ...attachedActive]
+  if (!allAttached.length) return null
+
+  // Work off process cards if available, else all attached cards
+  const processCards = allAttached.filter(c => getCardType(c) === 'Process')
+  const srcCards     = processCards.length ? processCards : allAttached
+
+  // Count how many of srcCards are done
+  const doneIds = new Set(attachedDone.map(c => c.id || c.cardId))
+  let doneCount = 0
+  for (const c of srcCards) {
+    if (doneIds.has(c.id || c.cardId) || LANE_MAP[extractList(c)]?.status === 'Done') doneCount++
   }
-  for (const c of cards) {
-    if (idSet.has(c.id || c.cardId)) {
-      total++
-      if (LANE_MAP[extractList(c)]?.status === 'Done') done++
+
+  // Find target value for the period that covers req.date
+  let targetVal = null
+  if (req.date && targets.length) {
+    const reqD = new Date(req.date + 'T00:00:00')
+    for (const t of targets) {
+      if (reqD >= new Date(t.startDate) && reqD <= new Date(t.endDate + 'T23:59:59')) {
+        targetVal = t.value
+        break
+      }
     }
   }
-  if (!total) return null
-  return { pct: Math.round(done / total * 100), done, total }
+
+  const denominator = targetVal ?? srcCards.length
+  if (!denominator) return null
+  return {
+    pct:      Math.min(100, Math.round(doneCount / denominator * 100)),
+    done:     doneCount,
+    total:    denominator,
+    vsTarget: targetVal != null,
+  }
 }
 
 function loadRequests(boardId) {
@@ -2029,9 +2098,94 @@ function SortTh({ colKey, sortKey, sortDir, onSort, children, className = '' }) 
   )
 }
 
+// ─── Request Volume Chart ─────────────────────────────────────────────────────
+
+function RequestVolumeChart({ requests }) {
+  const [period, setPeriod] = useState('monthly') // 'weekly' | 'monthly'
+
+  const data = useMemo(() => {
+    const buckets = {}
+    for (const r of requests) {
+      if (!r.date) continue
+      const d = new Date(r.date + 'T00:00:00')
+      let key, label
+      if (period === 'monthly') {
+        key   = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+        label = d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
+      } else {
+        // ISO week — anchor to Monday
+        const mon = new Date(d)
+        mon.setDate(d.getDate() - ((d.getDay() + 6) % 7))
+        key   = mon.toISOString().split('T')[0]
+        label = mon.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      }
+      if (!buckets[key]) buckets[key] = { key, label, open: 0, onHold: 0, closed: 0, total: 0 }
+      const s = r.status || 'open'
+      if (s === 'on-hold') buckets[key].onHold++
+      else if (s === 'closed') buckets[key].closed++
+      else buckets[key].open++
+      buckets[key].total++
+    }
+    return Object.values(buckets).sort((a, b) => a.key.localeCompare(b.key))
+  }, [requests, period])
+
+  const totalReqs = requests.length
+  const openCount = requests.filter(r => !r.status || r.status === 'open').length
+  const closedCount = requests.filter(r => r.status === 'closed').length
+
+  return (
+    <div className="px-6 pt-4 pb-3 border-b border-border bg-white/[0.01] shrink-0">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-4">
+          <h3 className="text-xs font-semibold text-text-primary">Request Volume</h3>
+          <div className="flex items-center gap-3 text-[10px] text-text-muted">
+            <span><span className="font-semibold text-text-primary">{totalReqs}</span> total</span>
+            <span><span className="font-semibold text-blue-400">{openCount}</span> open</span>
+            <span><span className="font-semibold text-emerald-400">{closedCount}</span> closed</span>
+          </div>
+        </div>
+        <div className="flex gap-1 p-0.5 bg-white/5 rounded-lg">
+          {[['weekly', 'W/W'], ['monthly', 'M/M']].map(([p, label]) => (
+            <button key={p} onClick={() => setPeriod(p)}
+              className={`px-2.5 py-1 rounded-md text-[10px] font-medium transition-colors ${
+                period === p ? 'bg-accent/20 text-accent' : 'text-text-muted hover:text-text-primary'
+              }`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {data.length === 0 ? (
+        <p className="text-xs text-text-muted/40 text-center py-6">No requests filed yet — add a request to see it plotted here.</p>
+      ) : (
+        <ResponsiveContainer width="100%" height={150}>
+          <ComposedChart data={data} margin={{ top: 2, right: 8, left: -24, bottom: 0 }} barSize={period === 'monthly' ? 24 : 14}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+            <XAxis dataKey="label" tick={{ fontSize: 9, fill: 'var(--color-text-muted, #9ca3af)' }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted, #9ca3af)' }} axisLine={false} tickLine={false} allowDecimals={false} />
+            <Tooltip
+              contentStyle={{ background: 'var(--color-surface, #1f2937)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 11 }}
+              cursor={{ fill: 'rgba(255,255,255,0.03)' }}
+              formatter={(val, name) => [val, name === 'onHold' ? 'On Hold' : name.charAt(0).toUpperCase() + name.slice(1)]}
+            />
+            <Bar dataKey="closed" name="Closed" stackId="a" fill="#22c55e" />
+            <Bar dataKey="onHold" name="On Hold" stackId="a" fill="#f97316" />
+            <Bar dataKey="open"   name="Open"   stackId="a" fill="#3b82f6" radius={[3, 3, 0, 0]} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      )}
+    </div>
+  )
+}
+
 function RequestTab({ boardId, cards, doneCards }) {
   const activeCards   = cards     || []
   const allCards      = useMemo(() => [...activeCards, ...(doneCards || [])], [activeCards, doneCards])
+
+  const targets = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem(`targets_${boardId}`) || '[]') } catch { return [] }
+  }, [boardId])
 
   const [requests,      setRequests]      = useState(() => loadRequests(boardId))
   const [editing,       setEditing]       = useState(null)
@@ -2223,7 +2377,13 @@ function RequestTab({ boardId, cards, doneCards }) {
   }, [requests, reqSort])
 
   return (
-    <div className="flex h-[calc(100vh-130px)]" onKeyDown={handlePanelKey}>
+    <div className="flex flex-col h-[calc(100vh-130px)]" onKeyDown={handlePanelKey}>
+
+      {/* ── Centerpiece: Request Volume Chart ── */}
+      <RequestVolumeChart requests={requests} />
+
+      {/* ── Bottom: list + edit panel ── */}
+      <div className="flex flex-1 min-h-0">
 
       {/* ── Left: request list ── */}
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
@@ -2269,7 +2429,7 @@ function RequestTab({ boardId, cards, doneCards }) {
                     ?.replace(/!\[[^\]]*\]\([^)]+\)/g, '')
                     ?.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
                     ?.replace(/[*_`#!]/g, '').replace(/\n/g, ' ').trim()
-                  const prog  = computeRequestProgress(r, activeCards, doneCards)
+                  const prog  = computeRequestProgress(r, activeCards, doneCards, targets)
                   const stage = computeCardStage(r, activeCards, doneCards)
                   return (
                     <tr key={r.id} onClick={() => openEdit(r)}
@@ -2324,7 +2484,9 @@ function RequestTab({ boardId, cards, doneCards }) {
                           <div className="flex flex-col gap-1 min-w-[100px]">
                             <div className="flex items-center justify-between">
                               <span className="text-[10px] font-semibold tabular-nums" style={{ color: progressColor(prog.pct) }}>{prog.pct}%</span>
-                              <span className="text-[10px] text-text-muted/50">{prog.done}/{prog.total}</span>
+                              <span className="text-[10px] text-text-muted/50" title={prog.vsTarget ? 'done / period target' : 'done / total'}>
+                                {prog.done}/{prog.total}{prog.vsTarget ? ' tgt' : ''}
+                              </span>
                             </div>
                             <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
                               <div className="h-full rounded-full transition-all" style={{ width: `${prog.pct}%`, background: progressColor(prog.pct) }} />
@@ -2626,6 +2788,7 @@ function RequestTab({ boardId, cards, doneCards }) {
           </div>
         </div>
       )}
+      </div>{/* flex flex-1 min-h-0 */}
     </div>
   )
 }
@@ -2966,7 +3129,7 @@ function TimelineTab({ boardId, cards, loading }) {
 
 export default function BoardPage() {
   const { boardId }                                              = useParams()
-  const { admin, accessibleIds, config, loading: accessLoading } = useAccess()
+  const { admin, accessibleIds, config, loading: accessLoading, getBoardRole } = useAccess()
   const { toasts, toast, dismiss }                               = useToast()
 
   const [configMissing, setConfigMissing] = useState(false)
@@ -3250,27 +3413,36 @@ export default function BoardPage() {
   const filteredActiveCards = useMemo(() => applyActiveFilters(cards),     [cards, listFilter, labelFilter, typeFilter, mcFilter])
   const filteredDoneCards   = useMemo(() => applyActiveFilters(doneCards),  [doneCards, listFilter, labelFilter, typeFilter, mcFilter])
 
+  const completionDateMap = useMemo(() => buildCompletionDateMap(movements), [movements])
+
+  const cutoffFilteredDoneCards = useMemo(() =>
+    filteredDoneCards.filter(c => {
+      const cardId = c.id || c.cardId
+      const d = completionDateMap.size > 0
+        ? completionDateMap.get(cardId)
+        : (c.dateLastActivity || c.updatedAt || c.due)
+      return d && new Date(d) >= throughputCutoff
+    }),
+    [filteredDoneCards, throughputCutoff, completionDateMap],
+  )
+
+  // KPI counts are scoped to the same cards visible in the throughput chart
   const diffCounts = useMemo(() => {
     const counts = { easy: 0, medium: 0, hard: 0, unknown: 0 }
-    for (const c of filteredDoneCards) {
+    for (const c of cutoffFilteredDoneCards) {
       const diff = (extractDifficulty(c) || '').toLowerCase()
       const dk   = ['easy','medium','hard'].includes(diff) ? diff : 'unknown'
       counts[dk]++
     }
     return counts
-  }, [filteredDoneCards])
-
-  const cutoffFilteredDoneCards = useMemo(() =>
-    filteredDoneCards.filter(c => {
-      const d = c.dateLastActivity || c.updatedAt || c.due
-      return d && new Date(d) >= throughputCutoff
-    }),
-    [filteredDoneCards, throughputCutoff],
-  )
+  }, [cutoffFilteredDoneCards])
 
   const filteredDoneForDrilldown = useMemo(() => {
     return doneCards.filter(c => {
-      const d = c.dateLastActivity || c.updatedAt || c.due
+      const cardId = c.id || c.cardId
+      const d = completionDateMap.size > 0
+        ? completionDateMap.get(cardId)
+        : (c.dateLastActivity || c.updatedAt || c.due)
       if (!d || new Date(d) < throughputCutoff) return false
       if (typeFilter !== 'all') {
         const t = getCardType(c)
@@ -3289,14 +3461,17 @@ export default function BoardPage() {
       }
       return true
     })
-  }, [doneCards, typeFilter, doneListFilter, doneLabelFilter, doneListFilterMode, doneLabelFilterMode, throughputCutoff])
+  }, [doneCards, completionDateMap, typeFilter, doneListFilter, doneLabelFilter, doneListFilterMode, doneLabelFilterMode, throughputCutoff])
 
   const periodDoneCount = useMemo(() =>
     filteredDoneCards.filter(c => {
-      const d = c.dateLastActivity || c.updatedAt || c.due
+      const cardId = c.id || c.cardId
+      const d = completionDateMap.size > 0
+        ? completionDateMap.get(cardId)
+        : (c.dateLastActivity || c.updatedAt || c.due)
       return d && new Date(d) >= throughputCutoff
     }).length,
-    [filteredDoneCards, throughputCutoff],
+    [filteredDoneCards, completionDateMap, throughputCutoff],
   )
 
   const periodActiveCount = useMemo(() =>
@@ -3530,11 +3705,13 @@ export default function BoardPage() {
 
   // ── Dashboard ─────────────────────────────────────────────────────────────
 
+  const boardRole = getBoardRole(boardId)
+
   const TABS = [
     { id: 'request',     label: 'Request',     icon: Inbox },
     { id: 'dashboard',   label: 'Dashboard',   icon: LayoutDashboard },
     { id: 'timeline',    label: 'Timeline',    icon: CalendarDays },
-    { id: 'utilization', label: 'Utilization', icon: Users },
+    ...(boardRole !== 'external' ? [{ id: 'utilization', label: 'Utilization', icon: Users }] : []),
   ]
 
   return (
@@ -3655,7 +3832,7 @@ export default function BoardPage() {
       )}
 
       {/* ── Utilization tab — always mounted so data survives tab switches ── */}
-      {(() => {
+      {boardRole !== 'external' && (() => {
         const { dateFrom: df, dateTo: dt } = getEffectiveDateRange(dateRange, customRange)
         return (
           <div className={activeTab !== 'utilization' ? 'hidden' : ''}>
@@ -3735,6 +3912,7 @@ export default function BoardPage() {
                 allDoneCards={doneCards}
                 boardId={boardId}
                 cutoff={throughputCutoff}
+                completionDateMap={completionDateMap}
                 allowedPeriods={allowedPeriods}
                 view={throughputView}
                 onViewChange={setThroughputView}

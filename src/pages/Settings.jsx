@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react'
-import { Sun, Moon, CheckCircle2, Circle, Save, Eye, EyeOff, Key, Layers, X, Settings as SettingsIcon } from 'lucide-react'
+import { Sun, Moon, CheckCircle2, Circle, Save, Eye, EyeOff, Key, Layers, X, Settings as SettingsIcon, Plus, UserX } from 'lucide-react'
 import { useTheme } from '../context/ThemeContext'
 import { useAccess } from '../context/AccessContext'
 import {
-  isGoogleConfigured,
   isGoogleConnected,
   getGoogleEmail,
   connectGoogle,
@@ -33,7 +32,7 @@ function Section({ title, description, children }) {
   return (
     <section className="mb-0">
       <h2 className="text-sm font-semibold text-text-primary mb-1">{title}</h2>
-      <p className="text-xs text-text-muted mb-4">{description}</p>
+      {description && <p className="text-xs text-text-muted mb-4">{description}</p>}
       {children}
     </section>
   )
@@ -173,41 +172,101 @@ function BoardIntegrationsModal({ board, onClose }) {
   )
 }
 
+// ─── External User management (for Frost Users) ───────────────────────────────
+
+function ExternalUserManager({ boardId, config, updateConfig }) {
+  const [val, setVal] = useState('')
+  const board = config?.boards?.[boardId]
+  const extUsers = board?.externalUsers ?? []
+
+  function add() {
+    const v = val.trim().toLowerCase()
+    if (!v || !v.includes('@') || extUsers.includes(v)) return
+    const next = {
+      ...config,
+      boards: {
+        ...config.boards,
+        [boardId]: {
+          ...board,
+          externalUsers: [...extUsers, v],
+          frostUsers: (board?.frostUsers ?? []).filter(u => u !== v),
+        },
+      },
+    }
+    updateConfig(next)
+    setVal('')
+  }
+
+  function remove(addr) {
+    const next = {
+      ...config,
+      boards: {
+        ...config.boards,
+        [boardId]: { ...board, externalUsers: extUsers.filter(u => u !== addr) },
+      },
+    }
+    updateConfig(next)
+  }
+
+  return (
+    <div className="mt-3 pt-3 border-t border-border/50">
+      <p className="text-[10px] font-medium text-amber-400 flex items-center gap-1 mb-2">
+        <UserX size={10} /> External Users
+        <span className="text-text-muted font-normal ml-1">— board access, no Utilization</span>
+      </p>
+      <div className="flex flex-wrap gap-1.5 mb-2">
+        {extUsers.length === 0
+          ? <p className="text-xs text-text-muted italic">None assigned.</p>
+          : extUsers.map(u => (
+              <span key={u} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-amber-500/10 text-amber-400">
+                {u}
+                <button onClick={() => remove(u)} className="hover:text-red-400 transition-colors"><X size={10} /></button>
+              </span>
+            ))
+        }
+      </div>
+      <div className="flex gap-2">
+        <input className="input text-xs py-1 flex-1" placeholder="external@example.com" value={val}
+          onChange={e => setVal(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} />
+        <button className="btn-secondary py-1 text-xs" onClick={add}><Plus size={11} /> Add</button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
 export default function Settings() {
-  const { isDark, toggleTheme }   = useTheme()
-  const { refreshEmail }          = useAccess()
+  const { isDark, toggleTheme }    = useTheme()
+  const { refreshEmail, admin, getBoardRole, accessibleIds, config, updateConfig, email, loading: configLoading } = useAccess()
   const { toasts, toast, dismiss } = useToast()
 
-  // Ares config
-  const [aresHost,     setAresHost]     = useState(() => localStorage.getItem('ares_host')     || '')
-  const [aresApiKey,   setAresApiKey]   = useState(() => localStorage.getItem('ares_api_key')  || '')
-  const [raintoolHost, setRaintoolHost] = useState(
-    () => localStorage.getItem('raintool_host') || 'https://hailstorm.frostdesigngroup.com'
-  )
-  const [trelloApiKey,   setTrelloApiKey]   = useState(() => localStorage.getItem('trello_api_key')   || '')
-  const [trelloToken,    setTrelloToken]    = useState(() => localStorage.getItem('trello_token')     || '')
-  const [runnApiKey,     setRunnApiKey]     = useState(() => localStorage.getItem('runn_api_key')     || '')
-  const [utilApiUrl,     setUtilApiUrl]     = useState(() => localStorage.getItem('util_api_url')     || '')
+  // Ares connection (needed by all users)
+  const [aresHost,   setAresHost]   = useState(() => localStorage.getItem('ares_host')    || '')
+  const [aresApiKey, setAresApiKey] = useState(() => localStorage.getItem('ares_api_key') || '')
 
-  // Per-board integrations modal
-  const [integrationsFor, setIntegrationsFor] = useState(null) // board object or null
-
-  // Board visibility
-  const [allBoards,    setAllBoards]    = useState([])
-  const [hiddenIds,    setHiddenIds]    = useState(() => {
-    try { return new Set(JSON.parse(localStorage.getItem('hidden_board_ids') || '[]')) }
-    catch { return new Set() }
-  })
-
-  // Google config
-  const [googleClientId,  setGoogleClientId]  = useState(() => localStorage.getItem('google_client_id') || '')
+  // Google auth
   const [googleConnected, setGoogleConnected] = useState(isGoogleConnected)
   const [googleEmail,     setGoogleEmail]     = useState(getGoogleEmail)
   const [googleLoading,   setGoogleLoading]   = useState(false)
 
+  // Per-board integrations modal
+  const [integrationsFor, setIntegrationsFor] = useState(null)
+
+  // Board visibility
+  const [allBoards, setAllBoards] = useState([])
+  const [hiddenIds, setHiddenIds] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('hidden_board_ids') || '[]')) }
+    catch { return new Set() }
+  })
+
   // Pass Tracking
   const [passConfig,       setPassConfig]       = useState(() => getPassTrackingConfig())
-  const [passSetupLoading, setPassSetupLoading] = useState(new Set()) // set of boardIds currently setting up
+  const [passSetupLoading, setPassSetupLoading] = useState(new Set())
+
+  // Trello credentials (needed for Pass Tracking setup — read from storage, editable here)
+  const trelloApiKey = localStorage.getItem('trello_api_key') || ''
+  const trelloToken  = localStorage.getItem('trello_token')   || ''
 
   useEffect(() => {
     setGoogleConnected(isGoogleConnected())
@@ -224,6 +283,16 @@ export default function Settings() {
     }).catch(() => {})
   }, [])
 
+  // Boards this user can configure (admin sees all, frost sees their boards)
+  const configurableBoards = admin
+    ? allBoards
+    : allBoards.filter(b => { const r = getBoardRole(b.id); return r === 'frost' || r === 'admin' })
+
+  // External Users can't access Settings at all — they have no role that allows it
+  const hasSettingsAccess = !email   // unauthenticated (bootstrap)
+    || admin
+    || [...accessibleIds].some(id => { const r = getBoardRole(id); return r === 'frost' || r === 'admin' })
+
   function toggleBoardHidden(id) {
     setHiddenIds(prev => {
       const next = new Set(prev)
@@ -234,43 +303,26 @@ export default function Settings() {
   }
 
   function saveAresConfig() {
-    localStorage.setItem('ares_host',      aresHost.trim())
-    localStorage.setItem('ares_api_key',   aresApiKey.trim())
-    localStorage.setItem('raintool_host',  raintoolHost.trim())
-    localStorage.setItem('trello_api_key', trelloApiKey.trim())
-    localStorage.setItem('trello_token',   trelloToken.trim())
-    localStorage.setItem('runn_api_key',   runnApiKey.trim())
-    localStorage.setItem('util_api_url',   utilApiUrl.trim())
-    toast.success('Configuration saved.')
-  }
-
-  function saveGoogleClientId() {
-    localStorage.setItem('google_client_id', googleClientId.trim())
-    toast.success('Google Client ID saved.')
+    localStorage.setItem('ares_host',    aresHost.trim())
+    localStorage.setItem('ares_api_key', aresApiKey.trim())
+    toast.success('Connection settings saved.')
   }
 
   function handleConnect() {
     setGoogleLoading(true)
     connectGoogle({
-      onSuccess: ({ email }) => {
-        setGoogleConnected(true)
-        setGoogleEmail(email)
-        setGoogleLoading(false)
-        refreshEmail()   // notify AccessContext so board/admin visibility updates
-        toast.success(`Connected as ${email || 'Google account'}`)
+      onSuccess: ({ email: e }) => {
+        setGoogleConnected(true); setGoogleEmail(e); setGoogleLoading(false)
+        refreshEmail()
+        toast.success(`Connected as ${e || 'Google account'}`)
       },
-      onError: (msg) => {
-        setGoogleLoading(false)
-        toast.error(msg)
-      },
+      onError: (msg) => { setGoogleLoading(false); toast.error(msg) },
     })
   }
 
   function handleDisconnect() {
-    disconnectGoogle()
-    setGoogleConnected(false)
-    setGoogleEmail(null)
-    refreshEmail()       // notify AccessContext
+    disconnectGoogle(); setGoogleConnected(false); setGoogleEmail(null)
+    refreshEmail()
     toast.info('Google account disconnected.')
   }
 
@@ -302,15 +354,27 @@ export default function Settings() {
     toast.info('Pass tracking disabled for board.')
   }
 
+  // Wait for config to load before checking access
+  if (configLoading) return null
+
+  if (email && !hasSettingsAccess) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-2 text-text-muted">
+        <p className="text-sm">Settings are not available for your account.</p>
+        <p className="text-xs">Contact your admin if you need access.</p>
+      </div>
+    )
+  }
+
   return (
     <div className="h-full overflow-y-auto">
       <div className="max-w-xl mx-auto px-6 py-8">
         <h1 className="text-base font-semibold text-text-primary mb-6">Settings</h1>
 
-        {/* ── Ares API */}
+        {/* ── Ares Connection ── */}
         <Section
-          title="Ares API Configuration"
-          description="Connect to your Ares server. All credentials are stored locally in your browser."
+          title="Ares Connection"
+          description="Connect to the Ares API. Credentials are stored locally in your browser."
         >
           <div className="flex flex-col gap-3">
             <div>
@@ -319,76 +383,26 @@ export default function Settings() {
                 value={aresHost} onChange={e => setAresHost(e.target.value)} />
             </div>
             <div>
-              <label className="block text-xs text-text-muted mb-1">Ares API Key</label>
+              <label className="block text-xs text-text-muted mb-1 flex items-center gap-1">
+                <Key size={11} /> Ares API Key
+              </label>
               <input className="input" type="password" placeholder="••••••••••••"
                 value={aresApiKey} onChange={e => setAresApiKey(e.target.value)} />
-            </div>
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Raintool Host</label>
-              <input className="input" placeholder="https://hailstorm.frostdesigngroup.com"
-                value={raintoolHost} onChange={e => setRaintoolHost(e.target.value)} />
-            </div>
-            <div>
-              <label className="block text-xs text-text-muted mb-1 flex items-center gap-1">
-                <Key size={11} /> Trello API Key
-              </label>
-              <input className="input" type="password" placeholder="••••••••••••"
-                value={trelloApiKey} onChange={e => setTrelloApiKey(e.target.value)} />
-            </div>
-            <div>
-              <label className="block text-xs text-text-muted mb-1 flex items-center gap-1">
-                <Key size={11} /> Trello Token
-              </label>
-              <input className="input" type="password" placeholder="••••••••••••"
-                value={trelloToken} onChange={e => setTrelloToken(e.target.value)} />
-              <p className="text-xs text-text-muted mt-1">
-                Generate at: <code className="text-accent">trello.com/1/authorize?expiration=never&amp;scope=read,write&amp;response_type=token&amp;key=YOUR_KEY</code>
-              </p>
-            </div>
-            <div>
-              <label className="block text-xs text-text-muted mb-1 flex items-center gap-1">
-                <Key size={11} /> Runn API Key
-              </label>
-              <input className="input" type="password" placeholder="••••••••••••"
-                value={runnApiKey} onChange={e => setRunnApiKey(e.target.value)} />
-              <p className="text-xs text-text-muted mt-1">
-                Found under <strong>Settings → API</strong> in your Runn app (admin only).
-                Forwarded to the backend as <code className="text-accent">X-Runn-Api-Key</code> — overrides the server <code className="text-accent">.env</code> value.
-              </p>
-            </div>
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Utilization API URL</label>
-              <input className="input" placeholder="http://localhost:8765"
-                value={utilApiUrl} onChange={e => setUtilApiUrl(e.target.value)} />
-              <p className="text-xs text-text-muted mt-1">
-                Base URL of the utilization backend (run <code className="text-accent">uvicorn main:app --port 8765</code> in <code className="text-accent">server/</code>).
-              </p>
             </div>
             <button className="btn-primary w-fit" onClick={saveAresConfig}>
               <Save size={13} /> Save
             </button>
-            <p className="text-xs text-amber-400/80">
-              The Ares server must have CORS enabled for browser requests to work.
-            </p>
           </div>
         </Section>
 
         <Divider />
 
-        {/* ── Google Account */}
+        {/* ── Google Auth ── */}
         <Section
           title="Google Account"
-          description="Connect a Google account to enable Gmail and Drive integration."
+          description="Sign in with Google to access your boards."
         >
           <div className="flex flex-col gap-3">
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Google Client ID</label>
-              <input className="input" placeholder="123456789-abc.apps.googleusercontent.com"
-                value={googleClientId} onChange={e => setGoogleClientId(e.target.value)} />
-              <button className="btn-secondary mt-2" onClick={saveGoogleClientId}>
-                <Save size={13} /> Save Client ID
-              </button>
-            </div>
             <div className="flex items-center gap-2">
               {googleConnected
                 ? <CheckCircle2 size={14} className="text-emerald-400" />
@@ -402,64 +416,72 @@ export default function Settings() {
             </div>
             <div className="flex gap-2">
               <button className="btn-primary" onClick={handleConnect}
-                disabled={googleLoading || !isGoogleConfigured()}>
+                disabled={googleLoading}>
                 {googleLoading ? 'Connecting…' : googleConnected ? 'Reconnect' : 'Connect'}
               </button>
               {googleConnected && (
                 <button className="btn-secondary" onClick={handleDisconnect}>Disconnect</button>
               )}
             </div>
-            <p className="text-xs text-text-muted">
-              Access tokens expire after ~1 hour. You\'ll be asked to reconnect periodically.
-            </p>
           </div>
         </Section>
 
         <Divider />
 
-        {/* ── Board Configuration */}
-        {allBoards.length > 0 && (
-          <>
-            <Divider />
-            <Section
-              title="Board Configuration"
-              description="Per-board settings: visibility and feature toggles."
-            >
-              <div className="flex flex-col gap-1.5">
-                {allBoards.map(b => {
-                  const hidden      = hiddenIds.has(b.id)
-                  const passEnabled = !!passConfig[b.id]?.enabled
-                  const passLoading = passSetupLoading.has(b.id)
-                  const canEnablePass = !!(trelloApiKey && trelloToken)
-                  const runnProj = (() => { try { return JSON.parse(localStorage.getItem(`runn_project_${b.id}`) || 'null') } catch { return null } })()
-                  const rtProj   = (() => { try { return JSON.parse(localStorage.getItem(`rt_project_${b.id}`)   || 'null') } catch { return null } })()
-                  const hasIntegrations = !!(runnProj || rtProj)
-                  return (
-                    <div key={b.id} className={`flex items-center justify-between px-3 py-2 rounded-lg border transition-colors ${hidden ? 'border-border/50 opacity-50' : 'border-border bg-white/[0.02]'}`}>
+        {/* ── Board Configuration ── */}
+        <Section
+          title="Board Configuration"
+          description={admin
+            ? "Per-board settings, visibility, and integrations."
+            : "Configure integrations for your assigned boards."
+          }
+        >
+          {configurableBoards.length === 0 ? (
+            <p className="text-xs text-text-muted italic">
+              {allBoards.length === 0
+                ? 'No boards found. Check your Ares connection above.'
+                : 'No boards assigned to your account.'}
+            </p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {configurableBoards.map(b => {
+                const hidden      = hiddenIds.has(b.id)
+                const passEnabled = !!passConfig[b.id]?.enabled
+                const passLoading = passSetupLoading.has(b.id)
+                const canEnablePass = !!(trelloApiKey && trelloToken)
+                const runnProj = (() => { try { return JSON.parse(localStorage.getItem(`runn_project_${b.id}`) || 'null') } catch { return null } })()
+                const rtProj   = (() => { try { return JSON.parse(localStorage.getItem(`rt_project_${b.id}`)   || 'null') } catch { return null } })()
+                const hasIntegrations = !!(runnProj || rtProj)
+                const isFrost = !admin && getBoardRole(b.id) === 'frost'
+                return (
+                  <div key={b.id} className={`rounded-lg border transition-colors ${hidden ? 'border-border/50 opacity-50' : 'border-border bg-white/[0.02]'}`}>
+                    <div className="flex items-center justify-between px-3 py-2">
                       <div className="flex flex-col min-w-0">
                         <span className="text-xs font-medium text-text-primary truncate">{b.name || b.id}</span>
                         {hidden && <span className="text-[10px] text-text-muted">Hidden</span>}
                       </div>
                       <div className="flex items-center gap-1.5 ml-3 shrink-0">
-                        {/* Pass Tracking toggle */}
-                        <button
-                          disabled={passLoading || (!passEnabled && !canEnablePass)}
-                          onClick={() => passEnabled ? handleDisablePassTracking(b.id) : handleSetupPassTracking(b.id)}
-                          className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] transition-colors ${
-                            passEnabled
-                              ? 'border-emerald-500/30 text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/10'
-                              : 'border-border text-text-muted hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed'
-                          }`}
-                          title={
-                            passLoading ? 'Setting up…'
-                            : passEnabled ? 'Disable pass tracking'
-                            : canEnablePass ? 'Enable pass tracking'
-                            : 'Save Trello credentials first'
-                          }
-                        >
-                          <Layers size={10} />
-                          {passLoading ? '…' : 'Passes'}
-                        </button>
+                        {/* Pass Tracking — admin only (requires Trello credentials) */}
+                        {admin && (
+                          <button
+                            disabled={passLoading || (!passEnabled && !canEnablePass)}
+                            onClick={() => passEnabled ? handleDisablePassTracking(b.id) : handleSetupPassTracking(b.id)}
+                            className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] transition-colors ${
+                              passEnabled
+                                ? 'border-emerald-500/30 text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/10'
+                                : 'border-border text-text-muted hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed'
+                            }`}
+                            title={
+                              passLoading ? 'Setting up…'
+                              : passEnabled ? 'Disable pass tracking'
+                              : canEnablePass ? 'Enable pass tracking'
+                              : 'Save Trello credentials in Admin first'
+                            }
+                          >
+                            <Layers size={10} />
+                            {passLoading ? '…' : 'Passes'}
+                          </button>
+                        )}
                         {/* Integrations cog */}
                         {isUtilApiConfigured() && (
                           <button
@@ -474,31 +496,39 @@ export default function Settings() {
                             <SettingsIcon size={11} />
                           </button>
                         )}
-                        {/* Hide toggle */}
-                        <button
-                          onClick={() => toggleBoardHidden(b.id)}
-                          className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] transition-colors ${
-                            hidden
-                              ? 'border-border text-text-muted hover:bg-white/5'
-                              : 'border-amber-500/30 text-amber-400 hover:bg-amber-500/10'
-                          }`}
-                          title={hidden ? 'Show in sidebar' : 'Hide from sidebar'}
-                        >
-                          {hidden ? <Eye size={10} /> : <EyeOff size={10} />}
-                          {hidden ? 'Show' : 'Hide'}
-                        </button>
+                        {/* Hide toggle — admin only */}
+                        {admin && (
+                          <button
+                            onClick={() => toggleBoardHidden(b.id)}
+                            className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] transition-colors ${
+                              hidden
+                                ? 'border-border text-text-muted hover:bg-white/5'
+                                : 'border-amber-500/30 text-amber-400 hover:bg-amber-500/10'
+                            }`}
+                            title={hidden ? 'Show in sidebar' : 'Hide from sidebar'}
+                          >
+                            {hidden ? <Eye size={10} /> : <EyeOff size={10} />}
+                            {hidden ? 'Show' : 'Hide'}
+                          </button>
+                        )}
                       </div>
                     </div>
-                  )
-                })}
-              </div>
-            </Section>
-          </>
-        )}
+                    {/* Frost User: External User management */}
+                    {isFrost && config && (
+                      <div className="px-3 pb-3">
+                        <ExternalUserManager boardId={b.id} config={config} updateConfig={updateConfig} />
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </Section>
 
         <Divider />
 
-        {/* ── Theme */}
+        {/* ── Appearance ── */}
         <Section title="Appearance" description="Choose your preferred color scheme.">
           <button className="btn-secondary" onClick={toggleTheme}>
             {isDark ? <Sun size={14} /> : <Moon size={14} />}

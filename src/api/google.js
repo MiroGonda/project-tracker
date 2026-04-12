@@ -1,65 +1,33 @@
-// Identity-only scopes — we only need to know who the user is
-const SCOPES = 'openid email profile'
+import { auth } from '../firebase'
+import { GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth'
 
 export function isGoogleConfigured() {
-  return !!localStorage.getItem('google_client_id')
+  return true // Firebase handles configuration internally — no manual Client ID needed
 }
 
 export function isGoogleConnected() {
-  const token  = localStorage.getItem('google_access_token')
-  const expiry = localStorage.getItem('google_token_expiry')
-  if (!token || !expiry) return false
-  return new Date(expiry) > new Date()
+  return auth.currentUser !== null
 }
 
 export function getGoogleEmail() {
-  return localStorage.getItem('google_user_email') || null
+  return auth.currentUser?.email || null
 }
 
 export function disconnectGoogle() {
-  localStorage.removeItem('google_access_token')
-  localStorage.removeItem('google_token_expiry')
-  localStorage.removeItem('google_user_email')
+  return signOut(auth)
 }
 
 /**
- * Initiates a GIS token request popup.
+ * Initiates a Google sign-in popup.
  * Must be called from a user gesture (button click).
  */
 export function connectGoogle({ onSuccess, onError }) {
-  const clientId = localStorage.getItem('google_client_id')
-  if (!clientId) {
-    onError('No Google Client ID configured. Add it in Settings.')
-    return
-  }
-  if (!window.google?.accounts?.oauth2) {
-    onError('Google Identity Services library not loaded. Check your internet connection.')
-    return
-  }
-
-  const client = window.google.accounts.oauth2.initTokenClient({
-    client_id: clientId,
-    scope: SCOPES,
-    callback: async (tokenResponse) => {
-      if (tokenResponse.error) {
-        onError(tokenResponse.error_description || tokenResponse.error)
-        return
+  const provider = new GoogleAuthProvider()
+  signInWithPopup(auth, provider)
+    .then(result => onSuccess({ email: result.user.email }))
+    .catch(err => {
+      if (err.code !== 'auth/popup-closed-by-user') {
+        onError(err.message)
       }
-      const expiresAt = new Date(Date.now() + tokenResponse.expires_in * 1000).toISOString()
-      localStorage.setItem('google_access_token', tokenResponse.access_token)
-      localStorage.setItem('google_token_expiry', expiresAt)
-
-      try {
-        const res  = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-          headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
-        })
-        const info = await res.json()
-        localStorage.setItem('google_user_email', info.email || '')
-        onSuccess({ access_token: tokenResponse.access_token, email: info.email })
-      } catch {
-        onSuccess({ access_token: tokenResponse.access_token, email: '' })
-      }
-    },
-  })
-  client.requestAccessToken({ prompt: 'consent' })
+    })
 }

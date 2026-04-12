@@ -8,16 +8,27 @@ import Admin from './pages/Admin'
 import LoginPage from './pages/LoginPage'
 
 function AppShell() {
-  const { email, refreshEmail } = useAccess()
+  const { email, refreshEmail, admin, getBoardRole, accessibleIds, loading } = useAccess()
   const location = useLocation()
 
-  // Settings is always reachable — needed to configure the Google Client ID
-  // before a user can sign in for the first time.
   const isSettings = location.pathname === '/settings'
+
+  // Wait for Firebase Auth + Firestore config to resolve before rendering
+  if (loading) return null
 
   if (!email && !isSettings) {
     return <LoginPage onLogin={refreshEmail} />
   }
+
+  // Determine if the logged-in user has any settings access (admin or frost on any board)
+  const canAccessSettings = !email
+    || admin
+    || [...accessibleIds].some(id => { const r = getBoardRole(id); return r === 'frost' || r === 'admin' })
+
+  // Default redirect: admin/frost → settings; external → first accessible board
+  const defaultRedirect = canAccessSettings
+    ? '/settings'
+    : accessibleIds.size > 0 ? `/board/${[...accessibleIds][0]}` : '/settings'
 
   return (
     <div className="flex h-screen overflow-hidden bg-bg text-text-primary">
@@ -27,7 +38,7 @@ function AppShell() {
           <Route path="/board/:boardId" element={<BoardPage />} />
           <Route path="/settings"       element={<Settings />} />
           <Route path="/admin"          element={<Admin />} />
-          <Route path="*"               element={<Navigate to="/settings" replace />} />
+          <Route path="*"               element={<Navigate to={defaultRedirect} replace />} />
         </Routes>
       </main>
     </div>

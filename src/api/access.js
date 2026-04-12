@@ -1,30 +1,16 @@
-// Access config is fetched from public/access-config.json (committed to repo).
-// Admins can override it locally via the Admin page — stored in localStorage.
-// To make changes permanent, export the JSON and commit it.
+import { db } from '../firebase'
+import { doc, getDoc, setDoc } from 'firebase/firestore'
 
-const CONFIG_URL = `${import.meta.env.BASE_URL}access-config.json`
-const LS_KEY     = 'ares_access_config_override'
+const ACCESS_DOC = doc(db, 'config', 'access')
 
 export async function fetchAccessConfig() {
-  const override = localStorage.getItem(LS_KEY)
-  if (override) {
-    try { return JSON.parse(override) } catch {}
-  }
-  const res = await fetch(`${CONFIG_URL}?_=${Date.now()}`)
-  if (!res.ok) throw new Error(`Could not load access-config.json (${res.status})`)
-  return res.json()
+  const snap = await getDoc(ACCESS_DOC)
+  if (!snap.exists()) return { admins: [], boards: {} }
+  return snap.data()
 }
 
-export function saveAccessConfig(config) {
-  localStorage.setItem(LS_KEY, JSON.stringify(config, null, 2))
-}
-
-export function clearAccessOverride() {
-  localStorage.removeItem(LS_KEY)
-}
-
-export function hasOverride() {
-  return !!localStorage.getItem(LS_KEY)
+export async function saveAccessConfig(config) {
+  await setDoc(ACCESS_DOC, config)
 }
 
 /**
@@ -45,15 +31,49 @@ export function isAdmin(config, email) {
 /**
  * Returns a Set of board IDs the user can see.
  * Admins see everything that is listed under config.boards.
- * '*' in users means all authenticated users.
+ * Frost and external users see their assigned boards.
+ * Legacy: '*' in users[] means all authenticated users (treated as frost-level).
  */
 export function getAccessibleBoardIds(config, email) {
   if (!config?.boards) return new Set()
   if (isAdmin(config, email)) return new Set(Object.keys(config.boards))
   const ids = new Set()
   for (const [id, board] of Object.entries(config.boards)) {
-    const users = board.users ?? []
-    if (users.includes('*') || (email && users.includes(email))) ids.add(id)
+    const legacy = board.users ?? []
+    if (legacy.includes('*') || (email && legacy.includes(email))) { ids.add(id); continue }
+    if (email && (board.frostUsers?.includes(email) || board.externalUsers?.includes(email))) ids.add(id)
   }
   return ids
+}
+
+/**
+ * Returns the user's role on a specific board.
+ * 'admin'    — user is in config.admins
+ * 'frost'    — user is in board.frostUsers (or legacy users[])
+ * 'external' — user is in board.externalUsers
+ * null       — no access
+ */
+export function getUserBoardRole(config, email, boardId) {
+  if (!config || !email || !boardId) return null
+  if (isAdmin(config, email)) return 'admin'
+  const board = config.boards?.[boardId]
+  if (!board) return null
+  if (board.frostUsers?.includes(email)) return 'frost'
+  if (board.externalUsers?.includes(email)) return 'external'
+  // Legacy: users[] treated as frost-level
+  const legacy = board.users ?? []
+  if (legacy.includes('*') || legacy.includes(email)) return 'frost'
+  return null
+}
+
+/** Admin or frost users can see the Utilization tab. */
+export function canSeeUtilization(config, email, boardId) {
+  const role = getUserBoardRole(config, email, boardId)
+  return role === 'admin' || role === 'frost'
+}
+
+/** Admin or frost users can configure board integrations (Runn/Raintool). */
+export function canConfigureBoard(config, email, boardId) {
+  const role = getUserBoardRole(config, email, boardId)
+  return role === 'admin' || role === 'frost'
 }

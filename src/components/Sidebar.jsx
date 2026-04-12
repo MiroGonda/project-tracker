@@ -15,7 +15,11 @@ export default function Sidebar() {
   const [apiBoards,     setApiBoards]     = useState([])
   const [boardsLoading, setBoardsLoading] = useState(false)
 
-  const { admin, canAdmin, accessibleIds, loading: configLoading } = useAccess()
+  const { admin, canAdmin, accessibleIds, loading: configLoading, getBoardRole, email } = useAccess()
+
+  const canAccessSettings = !email
+    || admin
+    || [...accessibleIds].some(id => { const r = getBoardRole(id); return r === 'frost' || r === 'admin' })
 
   useEffect(() => {
     const host   = localStorage.getItem('ares_host')
@@ -42,7 +46,7 @@ export default function Sidebar() {
   }, [apiBoards, admin, accessibleIds, hiddenIds])
 
   const STATIC_NAV = [
-    { to: '/settings', label: 'Settings', Icon: Settings   },
+    ...(canAccessSettings ? [{ to: '/settings', label: 'Settings', Icon: Settings }] : []),
     ...(canAdmin ? [{ to: '/admin', label: 'Admin', Icon: ShieldCheck }] : []),
   ]
 

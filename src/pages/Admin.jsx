@@ -1,11 +1,16 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
-  ShieldCheck, Plus, Trash2, Users, LayoutDashboard,
+  ShieldCheck, Plus, Trash2, LayoutDashboard,
   Download, Upload, RefreshCw, AlertTriangle, Check, X, AlertCircle,
+  Key, Save, Sun, Moon, CheckCircle2, Circle, UserCheck, UserX,
 } from 'lucide-react'
 import { useAccess } from '../context/AccessContext'
-import { clearAccessOverride, hasOverride } from '../api/access'
+import { useTheme } from '../context/ThemeContext'
 import { listBoards } from '../api/ares'
+import {
+  isGoogleConfigured, isGoogleConnected, getGoogleEmail,
+  connectGoogle, disconnectGoogle,
+} from '../api/google'
 import Toast from '../components/Toast'
 import useToast from '../hooks/useToast'
 import Spinner from '../components/Spinner'
@@ -22,9 +27,14 @@ function Section({ title, description, children }) {
 
 function Divider() { return <div className="border-t border-border my-6" /> }
 
-function Tag({ label, onRemove }) {
+function Tag({ label, role, onRemove }) {
+  const roleStyle = role === 'frost'
+    ? 'bg-indigo-500/10 text-indigo-400'
+    : role === 'external'
+      ? 'bg-amber-500/10 text-amber-400'
+      : 'bg-accent/10 text-accent'
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-accent/10 text-accent text-xs">
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${roleStyle}`}>
       {label}
       {onRemove && (
         <button onClick={onRemove} className="hover:text-red-400 transition-colors"><X size={10} /></button>
@@ -51,8 +61,22 @@ function AddEmailInput({ onAdd, placeholder = 'user@example.com' }) {
 
 export default function Admin() {
   const { config, updateConfig, canAdmin, email, reload } = useAccess()
+  const { isDark, toggleTheme } = useTheme()
   const { toasts, toast, dismiss } = useToast()
 
+  // Backend API config state (moved from Settings)
+  const [raintoolHost, setRaintoolHost] = useState(() => localStorage.getItem('raintool_host') || 'https://hailstorm.frostdesigngroup.com')
+  const [trelloApiKey, setTrelloApiKey] = useState(() => localStorage.getItem('trello_api_key') || '')
+  const [trelloToken,  setTrelloToken]  = useState(() => localStorage.getItem('trello_token')   || '')
+  const [runnApiKey,   setRunnApiKey]   = useState(() => localStorage.getItem('runn_api_key')   || '')
+  const [utilApiUrl,   setUtilApiUrl]   = useState(() => localStorage.getItem('util_api_url')   || '')
+
+  // Google auth state
+  const [googleConnected, setGoogleConnected] = useState(isGoogleConnected)
+  const [googleEmail2,    setGoogleEmail2]    = useState(getGoogleEmail)
+  const [googleLoading,   setGoogleLoading]   = useState(false)
+
+  // Access config
   const [apiBoards,     setApiBoards]     = useState([])
   const [boardsLoading, setBoardsLoading] = useState(false)
   const [boardsError,   setBoardsError]   = useState(null)
@@ -100,9 +124,11 @@ export default function Admin() {
 
   const isBootstrap = !draft.admins?.length
 
+  // ── Access config actions ──────────────────────────────────────────────────
+
   function save() {
     updateConfig(draft)
-    toast.success('Access config saved locally. Export JSON to make it permanent.')
+    toast.success('Access config saved.')
   }
 
   function exportJson() {
@@ -121,11 +147,6 @@ export default function Admin() {
     } catch (e) { toast.error(`Invalid JSON: ${e.message}`) }
   }
 
-  function revertToFile() {
-    clearAccessOverride(); reload()
-    toast.info('Override cleared — reverted to committed access-config.json.')
-  }
-
   function addAdmin(addr) {
     if (draft.admins.includes(addr)) return
     setDraft(d => ({ ...d, admins: [...d.admins, addr] }))
@@ -136,36 +157,73 @@ export default function Admin() {
 
   function ensureBoard(id, name) {
     if (!draft.boards[id])
-      setDraft(d => ({ ...d, boards: { ...d.boards, [id]: { name, users: [] } } }))
+      setDraft(d => ({ ...d, boards: { ...d.boards, [id]: { name, frostUsers: [], externalUsers: [] } } }))
   }
-  function toggleOpenAccess(id, name) {
+
+  function addFrostUser(id, name, addr) {
     ensureBoard(id, name)
     setDraft(d => {
-      const cur = d.boards[id]?.users ?? []
-      const next = cur.includes('*') ? cur.filter(u => u !== '*') : ['*', ...cur]
-      return { ...d, boards: { ...d.boards, [id]: { ...d.boards[id], name, users: next } } }
+      const frost = d.boards[id]?.frostUsers ?? []
+      if (frost.includes(addr)) return d
+      const ext = (d.boards[id]?.externalUsers ?? []).filter(u => u !== addr)
+      return { ...d, boards: { ...d.boards, [id]: { ...d.boards[id], name, frostUsers: [...frost, addr], externalUsers: ext } } }
     })
   }
-  function addUserToBoard(id, name, addr) {
+  function removeFrostUser(id, addr) {
+    setDraft(d => ({
+      ...d, boards: { ...d.boards, [id]: { ...d.boards[id], frostUsers: (d.boards[id]?.frostUsers ?? []).filter(u => u !== addr) } }
+    }))
+  }
+
+  function addExternalUser(id, name, addr) {
     ensureBoard(id, name)
     setDraft(d => {
-      const cur = d.boards[id]?.users ?? []
-      if (cur.includes(addr)) return d
-      return { ...d, boards: { ...d.boards, [id]: { ...d.boards[id], name, users: [...cur, addr] } } }
+      const ext = d.boards[id]?.externalUsers ?? []
+      if (ext.includes(addr)) return d
+      const frost = (d.boards[id]?.frostUsers ?? []).filter(u => u !== addr)
+      return { ...d, boards: { ...d.boards, [id]: { ...d.boards[id], name, externalUsers: [...ext, addr], frostUsers: frost } } }
     })
   }
-  function removeUserFromBoard(id, addr) {
-    setDraft(d => {
-      const cur = d.boards[id]?.users ?? []
-      return { ...d, boards: { ...d.boards, [id]: { ...d.boards[id], users: cur.filter(u => u !== addr) } } }
-    })
+  function removeExternalUser(id, addr) {
+    setDraft(d => ({
+      ...d, boards: { ...d.boards, [id]: { ...d.boards[id], externalUsers: (d.boards[id]?.externalUsers ?? []).filter(u => u !== addr) } }
+    }))
   }
+
   function removeBoard(id) {
     setDraft(d => { const next = { ...d.boards }; delete next[id]; return { ...d, boards: next } })
   }
 
-  const seen      = new Set()
-  const apiIds    = new Set()
+  // ── Backend API config actions ─────────────────────────────────────────────
+
+  function saveBackendConfig() {
+    localStorage.setItem('raintool_host',  raintoolHost.trim())
+    localStorage.setItem('trello_api_key', trelloApiKey.trim())
+    localStorage.setItem('trello_token',   trelloToken.trim())
+    localStorage.setItem('runn_api_key',   runnApiKey.trim())
+    localStorage.setItem('util_api_url',   utilApiUrl.trim())
+    toast.success('Backend configuration saved.')
+  }
+
+  function handleConnect() {
+    setGoogleLoading(true)
+    connectGoogle({
+      onSuccess: ({ email: e }) => {
+        setGoogleConnected(true); setGoogleEmail2(e); setGoogleLoading(false)
+        toast.success(`Connected as ${e || 'Google account'}`)
+      },
+      onError: (msg) => { setGoogleLoading(false); toast.error(msg) },
+    })
+  }
+  function handleDisconnect() {
+    disconnectGoogle(); setGoogleConnected(false); setGoogleEmail2(null)
+    toast.info('Google account disconnected.')
+  }
+
+  // ── Board list ─────────────────────────────────────────────────────────────
+
+  const seen   = new Set()
+  const apiIds = new Set()
   for (const b of apiBoards) { if (b.id) apiIds.add(b.id) }
   const allBoards = [
     ...apiBoards
@@ -184,7 +242,7 @@ export default function Admin() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-base font-semibold text-text-primary flex items-center gap-2">
-              <ShieldCheck size={16} className="text-accent" /> Access Control
+              <ShieldCheck size={16} className="text-accent" /> Admin
             </h1>
             <p className="text-xs text-text-muted mt-0.5">
               Logged in as <span className="text-text-primary">{email}</span>
@@ -197,11 +255,6 @@ export default function Admin() {
             <button className="btn-secondary py-1" onClick={exportJson}>
               <Download size={13} /> Export JSON
             </button>
-            {hasOverride() && (
-              <button className="btn-secondary py-1 text-amber-400 border-amber-400/30" onClick={revertToFile}>
-                <RefreshCw size={13} /> Revert to file
-              </button>
-            )}
           </div>
         </div>
 
@@ -209,15 +262,8 @@ export default function Admin() {
           <div className="mb-6 p-3 bg-amber-400/10 border border-amber-400/30 rounded-lg flex items-start gap-2 text-xs text-amber-300">
             <AlertTriangle size={14} className="shrink-0 mt-0.5" />
             <span>
-              <strong>Bootstrap mode:</strong> Add yourself as admin below, click Save,
-              then Export JSON and commit <code>public/access-config.json</code> to lock down access.
+              <strong>Bootstrap mode:</strong> Add yourself as admin below and click Save to lock down access.
             </span>
-          </div>
-        )}
-
-        {hasOverride() && (
-          <div className="mb-6 p-3 bg-accent/10 border border-accent/30 rounded-lg text-xs text-accent">
-            You have unsaved local overrides. Export JSON and commit to <code>public/access-config.json</code> to make them permanent.
           </div>
         )}
 
@@ -234,9 +280,93 @@ export default function Admin() {
           </div>
         )}
 
-        {/* Admins */}
+        {/* ── Backend Services ── */}
+        <Section title="Backend Services"
+          description="Integration credentials stored locally in your browser. Required for Utilization and Pass Tracking features.">
+          <div className="flex flex-col gap-3">
+            <div>
+              <label className="block text-xs text-text-muted mb-1">Raintool Host</label>
+              <input className="input" placeholder="https://hailstorm.frostdesigngroup.com"
+                value={raintoolHost} onChange={e => setRaintoolHost(e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-xs text-text-muted mb-1 flex items-center gap-1"><Key size={11} /> Trello API Key</label>
+              <input className="input" type="password" placeholder="••••••••••••"
+                value={trelloApiKey} onChange={e => setTrelloApiKey(e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-xs text-text-muted mb-1 flex items-center gap-1"><Key size={11} /> Trello Token</label>
+              <input className="input" type="password" placeholder="••••••••••••"
+                value={trelloToken} onChange={e => setTrelloToken(e.target.value)} />
+              <p className="text-xs text-text-muted mt-1">
+                Generate at: <code className="text-accent">trello.com/1/authorize?expiration=never&scope=read,write&response_type=token&key=YOUR_KEY</code>
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs text-text-muted mb-1 flex items-center gap-1"><Key size={11} /> Runn API Key</label>
+              <input className="input" type="password" placeholder="••••••••••••"
+                value={runnApiKey} onChange={e => setRunnApiKey(e.target.value)} />
+              <p className="text-xs text-text-muted mt-1">
+                Found under <strong>Settings → API</strong> in your Runn app.
+                Forwarded as <code className="text-accent">X-Runn-Api-Key</code> to the backend.
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs text-text-muted mb-1">Utilization API URL</label>
+              <input className="input" placeholder="https://your-backend.railway.app"
+                value={utilApiUrl} onChange={e => setUtilApiUrl(e.target.value)} />
+              <p className="text-xs text-text-muted mt-1">
+                Base URL of the utilization backend (proxies Runn + Ares cycle-time calls).
+              </p>
+            </div>
+            <button className="btn-primary w-fit" onClick={saveBackendConfig}>
+              <Save size={13} /> Save
+            </button>
+          </div>
+        </Section>
+
+        <Divider />
+
+        {/* ── Google Account ── */}
+        <Section title="Google Account"
+          description="Connect a Google account for authentication.">
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-2">
+              {googleConnected
+                ? <CheckCircle2 size={14} className="text-emerald-400" />
+                : <Circle       size={14} className="text-text-muted" />
+              }
+              <span className="text-xs text-text-muted">
+                {googleConnected ? `Connected${googleEmail2 ? ` as ${googleEmail2}` : ''}` : 'Not connected'}
+              </span>
+            </div>
+            <div className="flex gap-2">
+              <button className="btn-primary" onClick={handleConnect}
+                disabled={googleLoading || !isGoogleConfigured()}>
+                {googleLoading ? 'Connecting…' : googleConnected ? 'Reconnect' : 'Connect'}
+              </button>
+              {googleConnected && (
+                <button className="btn-secondary" onClick={handleDisconnect}>Disconnect</button>
+              )}
+            </div>
+          </div>
+        </Section>
+
+        <Divider />
+
+        {/* ── Appearance ── */}
+        <Section title="Appearance" description="Color scheme preference.">
+          <button className="btn-secondary" onClick={toggleTheme}>
+            {isDark ? <Sun size={14} /> : <Moon size={14} />}
+            {isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+          </button>
+        </Section>
+
+        <Divider />
+
+        {/* ── Admins ── */}
         <Section title="Admins"
-          description="Admins can see all boards and manage access.">
+          description="Admins have full access to all boards, settings, and user management.">
           <div className="flex flex-wrap gap-2">
             {draft.admins.length === 0
               ? <p className="text-xs text-text-muted italic">No admins configured.</p>
@@ -253,11 +383,10 @@ export default function Admin() {
 
         <Divider />
 
-        {/* Project Access */}
+        {/* ── Project Access ── */}
         <Section title="Project Access"
-          description="Control which users can see each project board. Admins always see everything.">
+          description="Assign Frost Users (full board access) and External Users (no Utilization tab) per board.">
 
-          {/* Boards status */}
           {boardsLoading && (
             <div className="flex items-center gap-2 text-text-muted text-xs mb-3">
               <Spinner size={12} /> Loading boards from Ares API…
@@ -278,9 +407,7 @@ export default function Admin() {
 
           {!boardsLoading && !boardsError && allBoards.length === 0 && (
             <div className="mb-4 flex items-center gap-3">
-              <p className="text-xs text-text-muted italic flex-1">
-                No boards returned from the API.
-              </p>
+              <p className="text-xs text-text-muted italic flex-1">No boards returned from the API.</p>
               <button className="btn-secondary py-1 text-xs" onClick={fetchBoards}>
                 <RefreshCw size={11} /> Retry
               </button>
@@ -295,10 +422,9 @@ export default function Admin() {
 
           <div className="flex flex-col gap-4">
             {allBoards.map(({ id, name }) => {
-              const boardCfg   = draft.boards[id] || { users: [] }
-              const users      = boardCfg.users || []
-              const openAccess = users.includes('*')
-              const namedUsers = users.filter(u => u !== '*')
+              const boardCfg    = draft.boards[id] || { frostUsers: [], externalUsers: [] }
+              const frostUsers  = boardCfg.frostUsers    ?? []
+              const extUsers    = boardCfg.externalUsers ?? []
               return (
                 <div key={id} className="p-4 bg-surface border border-border rounded-xl">
                   <div className="flex items-center gap-2 mb-3">
@@ -306,15 +432,6 @@ export default function Admin() {
                     <span className="text-sm font-medium text-text-primary">{name}</span>
                     <span className="text-xs text-text-muted font-mono">{id}</span>
                     <div className="flex-1" />
-                    <button onClick={() => toggleOpenAccess(id, name)}
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border transition-colors ${
-                        openAccess
-                          ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10'
-                          : 'border-border text-text-muted hover:border-emerald-500/40 hover:text-emerald-400'
-                      }`}>
-                      <Users size={10} />
-                      {openAccess ? 'All users' : 'Restricted'}
-                    </button>
                     {draft.boards[id] && (
                       <button onClick={() => removeBoard(id)}
                         className="text-text-muted hover:text-red-400 transition-colors">
@@ -322,16 +439,36 @@ export default function Admin() {
                       </button>
                     )}
                   </div>
-                  <div className="flex flex-wrap gap-1.5 mb-2">
-                    {namedUsers.length === 0 && !openAccess && (
-                      <p className="text-xs text-text-muted italic">No users assigned — only admins can see this.</p>
-                    )}
-                    {namedUsers.map(u => (
-                      <Tag key={u} label={u} onRemove={() => removeUserFromBoard(id, u)} />
-                    ))}
+
+                  {/* Frost Users */}
+                  <div className="mb-3">
+                    <p className="text-[10px] font-medium text-indigo-400 flex items-center gap-1 mb-1.5">
+                      <UserCheck size={10} /> Frost Users
+                      <span className="text-text-muted font-normal ml-1">— full board access, can configure integrations</span>
+                    </p>
+                    <div className="flex flex-wrap gap-1.5 mb-1">
+                      {frostUsers.length === 0
+                        ? <p className="text-xs text-text-muted italic">None assigned.</p>
+                        : frostUsers.map(u => <Tag key={u} label={u} role="frost" onRemove={() => removeFrostUser(id, u)} />)
+                      }
+                    </div>
+                    <AddEmailInput onAdd={addr => addFrostUser(id, name, addr)} placeholder="frost@example.com" />
                   </div>
-                  <AddEmailInput onAdd={addr => addUserToBoard(id, name, addr)}
-                    placeholder="user@example.com" />
+
+                  {/* External Users */}
+                  <div>
+                    <p className="text-[10px] font-medium text-amber-400 flex items-center gap-1 mb-1.5">
+                      <UserX size={10} /> External Users
+                      <span className="text-text-muted font-normal ml-1">— board access, no Utilization tab</span>
+                    </p>
+                    <div className="flex flex-wrap gap-1.5 mb-1">
+                      {extUsers.length === 0
+                        ? <p className="text-xs text-text-muted italic">None assigned.</p>
+                        : extUsers.map(u => <Tag key={u} label={u} role="external" onRemove={() => removeExternalUser(id, u)} />)
+                      }
+                    </div>
+                    <AddEmailInput onAdd={addr => addExternalUser(id, name, addr)} placeholder="external@example.com" />
+                  </div>
                 </div>
               )
             })}
