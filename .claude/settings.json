@@ -5,7 +5,16 @@
       "Bash(pip install:*)",
       "Bash(python -c \"import fastapi, uvicorn, httpx, dotenv; print\\('all imports OK'\\)\")",
       "Bash(python -c \"import main; print\\('main.py parsed OK'\\)\")",
-      "Bash(python -c \"import main; print\\('main.py parsed OK, routes:', [r.path for r in main.app.routes]\\)\")"
+      "Bash(python -c \"import main; print\\('main.py parsed OK, routes:', [r.path for r in main.app.routes]\\)\")",
+      "Bash(npx tsc:*)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('deps:', list\\(d.get\\('dependencies',{}\\).keys\\(\\)\\)\\); print\\('scripts:', d.get\\('scripts',{}\\)\\)\")",
+      "Bash(ls /home/miro/projects/project-tracker/.env*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)",
+      "Bash(git push:*)"
+    ],
+    "additionalDirectories": [
+      "/tmp/runn-proxy"
     ]
   }
 }

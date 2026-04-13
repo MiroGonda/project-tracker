@@ -8,7 +8,7 @@ import Admin from './pages/Admin'
 import LoginPage from './pages/LoginPage'
 
 function AppShell() {
-  const { email, refreshEmail, admin, getBoardRole, accessibleIds, loading } = useAccess()
+  const { email, refreshEmail, admin, canAdmin, getBoardRole, accessibleIds, loading } = useAccess()
   const location = useLocation()
 
   const isSettings = location.pathname === '/settings'
@@ -20,13 +20,8 @@ function AppShell() {
     return <LoginPage onLogin={refreshEmail} />
   }
 
-  // Determine if the logged-in user has any settings access (admin or frost on any board)
-  const canAccessSettings = !email
-    || admin
-    || [...accessibleIds].some(id => { const r = getBoardRole(id); return r === 'frost' || r === 'admin' })
-
-  // Default redirect: admin/frost → settings; external → first accessible board
-  const defaultRedirect = canAccessSettings
+  // Default redirect: go to settings if logged in, otherwise first accessible board
+  const defaultRedirect = email
     ? '/settings'
     : accessibleIds.size > 0 ? `/board/${[...accessibleIds][0]}` : '/settings'
 
@@ -37,7 +32,7 @@ function AppShell() {
         <Routes>
           <Route path="/board/:boardId" element={<BoardPage />} />
           <Route path="/settings"       element={<Settings />} />
-          <Route path="/admin"          element={<Admin />} />
+          <Route path="/admin"          element={canAdmin ? <Admin /> : <Navigate to={defaultRedirect} replace />} />
           <Route path="*"               element={<Navigate to={defaultRedirect} replace />} />
         </Routes>
       </main>
