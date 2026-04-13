@@ -11,7 +11,10 @@
       "Bash(ls /home/miro/projects/project-tracker/.env*)",
       "Bash(git add:*)",
       "Bash(git commit -m ':*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(awk -F: '{print $1}')",
+      "Bash(sed \"s/'.*$//\")",
+      "Bash(grep -oE \"localStorage\\\\.\\(getItem|setItem\\)\\\\\\(['\\\\`]\\([^'\\\\\"]+\\)\" src/pages/BoardPage.jsx)"
     ],
     "additionalDirectories": [
       "/tmp/runn-proxy"

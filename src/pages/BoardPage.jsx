@@ -13,6 +13,7 @@ import {
   BarChart2, Table2, LayoutList,
 } from 'lucide-react'
 import { boardCards, boardMovements, boardSummary, cycleTime } from '../api/phobos'
+import { subscribeRequests, saveRequest, deleteRequest, migrateLocalRequests } from '../api/requests'
 import { fetchBoardLabels, createBoardLabel, addLabelToCard, deleteCard, setCardDue, fetchBoardCardsWithFields, setCardCustomField } from '../api/trello'
 import { getPassConfigForBoard } from './Settings'
 import { useAccess } from '../context/AccessContext'
@@ -2056,10 +2057,6 @@ function computeRequestProgress(req, cards, doneCards, targets = []) {
   }
 }
 
-function loadRequests(boardId) {
-  try { return JSON.parse(localStorage.getItem(`requests_${boardId}`) || '[]') } catch { return [] }
-}
-
 // Stage priority order (ascending): Ongoing < For Review < Revising < For Approval
 const CARD_STAGE_PRIORITY = ['Ongoing', 'For Review', 'Revising', 'For Approval']
 
@@ -2334,7 +2331,7 @@ function RequestVolumeSection({ requests, boardId }) {
   )
 }
 
-function RequestTab({ boardId, cards, doneCards }) {
+function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSaveRequest, onDeleteRequest }) {
   const activeCards   = cards     || []
   const allCards      = useMemo(() => [...activeCards, ...(doneCards || [])], [activeCards, doneCards])
 
@@ -2342,7 +2339,6 @@ function RequestTab({ boardId, cards, doneCards }) {
     try { return JSON.parse(localStorage.getItem(`targets_${boardId}`) || '[]') } catch { return [] }
   }, [boardId])
 
-  const [requests,      setRequests]      = useState(() => loadRequests(boardId))
   const [editing,       setEditing]       = useState(null)
   const [isNew,         setIsNew]         = useState(false)
   const [briefMode,     setBriefMode]     = useState('edit')
@@ -2356,17 +2352,8 @@ function RequestTab({ boardId, cards, doneCards }) {
   const imageInputRef = useRef(null)
   const mcDropRef     = useRef(null)
 
-  // Save only when requests change — boardId intentionally excluded so this never
-  // fires during board navigation (which would write the old board's requests under
-  // the new boardId before the reload effect runs).
-  useEffect(() => {
-    try { localStorage.setItem(`requests_${boardId}`, JSON.stringify(requests)) } catch { /* storage full */ }
-  }, [requests]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    setRequests(loadRequests(boardId))
-    setEditing(null)
-  }, [boardId])
+  // Clear editing panel when navigating to a different board
+  useEffect(() => { setEditing(null) }, [boardId])
 
   // Default card search to the editing request name when switching to cards panel
   useEffect(() => {
@@ -2408,7 +2395,7 @@ function RequestTab({ boardId, cards, doneCards }) {
 
   async function handleSave() {
     if (!editing) return
-    setRequests(prev => isNew ? [...prev, editing] : prev.map(r => r.id === editing.id ? editing : r))
+    await onSaveRequest(editing)
     // Propagate deadline to all attached active cards
     if (editing.deadline && editing.attachedCardIds?.length) {
       const dueISO = new Date(editing.deadline + 'T23:59:00').toISOString()
@@ -2418,8 +2405,8 @@ function RequestTab({ boardId, cards, doneCards }) {
     setEditing(null)
   }
 
-  function handleDelete(id) {
-    setRequests(prev => prev.filter(r => r.id !== id))
+  async function handleDelete(id) {
+    await onDeleteRequest(id)
     if (editing?.id === id) setEditing(null)
   }
 
@@ -2533,6 +2520,12 @@ function RequestTab({ boardId, cards, doneCards }) {
     })
     return arr
   }, [requests, reqSort])
+
+  if (requestsLoading) return (
+    <div className="flex items-center justify-center gap-2 mt-16 text-text-muted text-sm">
+      <Spinner size={16} /> Loading requests…
+    </div>
+  )
 
   return (
     <div className="flex flex-col h-[calc(100vh-130px)]" onKeyDown={handlePanelKey}>
@@ -2996,14 +2989,10 @@ const PH_HOLIDAYS = {
 
 // ─── Timeline Tab ─────────────────────────────────────────────────────────────
 
-function TimelineTab({ boardId, cards, loading }) {
+function TimelineTab({ boardId, cards, loading, requests }) {
   const today_d  = new Date()
   const [calYear,  setCalYear]  = useState(today_d.getFullYear())
   const [calMonth, setCalMonth] = useState(today_d.getMonth())
-
-  // Load requests from localStorage (same source as RequestTab)
-  const [requests, setRequests] = useState(() => loadRequests(boardId))
-  useEffect(() => { setRequests(loadRequests(boardId)) }, [boardId])
 
   const firstDay  = new Date(calYear, calMonth, 1)
   const lastDay   = new Date(calYear, calMonth + 1, 0)
@@ -3339,16 +3328,32 @@ export default function BoardPage() {
   const passTracking    = useMemo(() => getPassConfigForBoard(boardId), [boardId])
   const [passMap,       setPassMap]       = useState(new Map()) // cardId → { first, second, third }
 
-  // Requests (for Pipeline "Request" column) — loaded from localStorage, kept in sync
-  const [boardRequests, setBoardRequests] = useState(() => loadRequests(boardId))
-  useEffect(() => { setBoardRequests(loadRequests(boardId)) }, [boardId])
+  // ── Requests — Firestore real-time subscription (shared across all users) ──
+  const [requests,        setRequests]        = useState([])
+  const [requestsLoading, setRequestsLoading] = useState(true)
+
+  useEffect(() => {
+    if (!boardId) return
+    setRequestsLoading(true)
+    migrateLocalRequests(boardId) // fire-and-forget: migrate any localStorage data on first load
+    const unsub = subscribeRequests(
+      boardId,
+      data => { setRequests(data); setRequestsLoading(false) },
+      err  => { console.error('requests subscription error:', err); setRequestsLoading(false) },
+    )
+    return unsub
+  }, [boardId])
+
   const requestsMap = useMemo(() => {
     const m = new Map()
-    for (const r of boardRequests) {
+    for (const r of requests) {
       for (const cid of r.attachedCardIds || []) m.set(cid, r)
     }
     return m
-  }, [boardRequests])
+  }, [requests])
+
+  const handleSaveRequest   = useCallback(req => saveRequest(boardId, req),   [boardId])
+  const handleDeleteRequest = useCallback(id  => deleteRequest(boardId, id),  [boardId])
 
   // Cycle time map: card identifier → days (for Done cards table)
   // Store under every possible identifier so any field on the card object can match
@@ -4030,12 +4035,16 @@ export default function BoardPage() {
 
       {/* ── Request tab ── */}
       {activeTab === 'request' && (
-        <RequestTab boardId={boardId} cards={cards} doneCards={doneCards} />
+        <RequestTab
+          boardId={boardId} cards={cards} doneCards={doneCards}
+          requests={requests} requestsLoading={requestsLoading}
+          onSaveRequest={handleSaveRequest} onDeleteRequest={handleDeleteRequest}
+        />
       )}
 
       {/* ── Timeline tab ── */}
       {activeTab === 'timeline' && (
-        <TimelineTab boardId={boardId} cards={cards} loading={loading} />
+        <TimelineTab boardId={boardId} cards={cards} loading={loading} requests={requests} />
       )}
 
 
