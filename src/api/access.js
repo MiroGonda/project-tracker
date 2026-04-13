@@ -66,13 +66,7 @@ export function getUserBoardRole(config, email, boardId) {
   return null
 }
 
-/** Admin or frost users can see the Utilization tab. */
-export function canSeeUtilization(config, email, boardId) {
-  const role = getUserBoardRole(config, email, boardId)
-  return role === 'admin' || role === 'frost'
-}
-
-/** Admin or frost users can configure board integrations (Runn/Raintool). */
+/** Admin or frost users can configure board integrations (Raintool). */
 export function canConfigureBoard(config, email, boardId) {
   const role = getUserBoardRole(config, email, boardId)
   return role === 'admin' || role === 'frost'

@@ -12,7 +12,7 @@ import {
 import {
   listBoards, boardCards, boardMovements, boardSummary,
   cycleTime, listRaintoolProjects,
-} from '../api/ares'
+} from '../api/phobos'
 import Spinner from '../components/Spinner'
 import Toast from '../components/Toast'
 import useToast from '../hooks/useToast'
@@ -588,8 +588,8 @@ export default function Ares() {
 
   // ── Config guard ────────────────────────────────────────────────────────────
   useEffect(() => {
-    const host   = localStorage.getItem('ares_host')
-    const apiKey = localStorage.getItem('ares_api_key')
+    const host   = localStorage.getItem('phobos_host')   || localStorage.getItem('ares_host')
+    const apiKey = localStorage.getItem('phobos_api_key') || localStorage.getItem('ares_api_key')
     if (!host || !apiKey) {
       setConfigMissing(true)
       return
@@ -685,7 +685,7 @@ export default function Ares() {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4 text-text-muted">
         <AlertTriangle size={32} className="text-amber-400" />
-        <p className="text-sm">Ares API not configured.</p>
+        <p className="text-sm">Phobos API not configured.</p>
         <Link to="/settings" className="btn-primary">Go to Settings</Link>
       </div>
     )

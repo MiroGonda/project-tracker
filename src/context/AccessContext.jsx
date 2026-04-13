@@ -28,6 +28,16 @@ export function AccessProvider({ children }) {
     setError(null)
     try {
       const c = await fetchAccessConfig()
+      // Seed shared service credentials into localStorage so api modules can read them.
+      // Read both new (phobos) and old (ares) field names to handle existing Firestore docs.
+      const svc = c.services || {}
+      const phHost   = svc.phobosHost   || svc.aresHost   || ''
+      const phApiKey = svc.phobosApiKey || svc.aresApiKey || ''
+      if (phHost)           localStorage.setItem('phobos_host',    phHost)
+      if (phApiKey)         localStorage.setItem('phobos_api_key', phApiKey)
+      if (svc.raintoolHost) localStorage.setItem('raintool_host',  svc.raintoolHost)
+      if (svc.trelloApiKey) localStorage.setItem('trello_api_key', svc.trelloApiKey)
+      if (svc.trelloToken)  localStorage.setItem('trello_token',   svc.trelloToken)
       setConfigState(c)
     } catch (e) {
       setError(e.message)

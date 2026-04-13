@@ -12,13 +12,12 @@ import {
   Plus, Link2, Eye, FileText, ImagePlus, Users,
   BarChart2, Table2, LayoutList,
 } from 'lucide-react'
-import { boardCards, boardMovements, boardSummary, cycleTime, listRaintoolProjects } from '../api/ares'
+import { boardCards, boardMovements, boardSummary, cycleTime } from '../api/phobos'
 import { fetchBoardLabels, createBoardLabel, addLabelToCard, deleteCard, setCardDue, fetchBoardCardsWithFields, setCardCustomField } from '../api/trello'
 import { getPassConfigForBoard } from './Settings'
 import { useAccess } from '../context/AccessContext'
 import Spinner from '../components/Spinner'
 import Toast from '../components/Toast'
-import UtilizationTab from './UtilizationTab'
 import useToast from '../hooks/useToast'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -405,7 +404,7 @@ function getPeriodBounds(key, period) {
 // Muted, dim palette — readable on dark backgrounds without being harsh
 const DIFF_COLORS = { easy: '#5a9e78', medium: '#b8893a', hard: '#b85c5c', unknown: '#6b7280' }
 
-// ── Movement field extractors (Ares API field names vary) ─────────────────────
+// ── Movement field extractors (Phobos API field names vary) ──────────────────
 function extractMovementToList(m) {
   // Only use fields that unambiguously represent a move destination.
   // Avoid m.list / m.currentList / m.to — those reflect the card's current state
@@ -2098,10 +2097,81 @@ function SortTh({ colKey, sortKey, sortDir, onSort, children, className = '' }) 
   )
 }
 
-// ─── Request Volume Chart ─────────────────────────────────────────────────────
+// ─── Request Targets Panel ────────────────────────────────────────────────────
 
-function RequestVolumeChart({ requests }) {
-  const [period, setPeriod] = useState('monthly') // 'weekly' | 'monthly'
+function ReqTargetsPanel({ targets, setTargets, boardId, onClose }) {
+  const [form, setForm] = useState({ startDate: '', endDate: '', value: '' })
+  function add() {
+    if (!form.startDate || !form.endDate || !form.value) return
+    const next = [...targets, { id: Date.now(), ...form, value: +form.value }]
+    setTargets(next)
+    localStorage.setItem(`req_targets_${boardId}`, JSON.stringify(next))
+    setForm({ startDate: '', endDate: '', value: '' })
+  }
+  function remove(id) {
+    const next = targets.filter(t => t.id !== id)
+    setTargets(next)
+    localStorage.setItem(`req_targets_${boardId}`, JSON.stringify(next))
+  }
+  return (
+    <div className="rounded-xl border border-amber-500/25 bg-surface/70 backdrop-blur-md p-4 w-72 shadow-xl">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-400">Request Targets</span>
+        <button onClick={onClose} className="text-text-muted hover:text-text-primary"><X size={13} /></button>
+      </div>
+      {targets.length > 0 && (
+        <div className="flex flex-col gap-2 mb-3">
+          {targets.map(t => (
+            <div key={t.id} className="flex items-center gap-2 text-xs text-text-muted">
+              <Target size={11} className="text-amber-400 shrink-0" />
+              <span className="flex-1">{fmtDateShort(t.startDate)} – {fmtDateShort(t.endDate)}</span>
+              <span className="text-text-primary font-medium">{t.value}</span>
+              <button onClick={() => remove(t.id)} className="hover:text-red-400"><X size={11} /></button>
+            </div>
+          ))}
+          <div className="border-t border-border/40" />
+        </div>
+      )}
+      <div className="flex flex-col gap-2">
+        <div className="grid grid-cols-2 gap-2">
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] text-text-muted">From</label>
+            <input type="date" className="input text-xs py-1" value={form.startDate} onChange={e => setForm(f => ({ ...f, startDate: e.target.value }))} />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] text-text-muted">To</label>
+            <input type="date" className="input text-xs py-1" value={form.endDate} onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))} />
+          </div>
+        </div>
+        <div className="flex gap-2 items-end">
+          <div className="flex flex-col gap-1 flex-1">
+            <label className="text-[10px] text-text-muted">Target total for period</label>
+            <input type="number" min="1" className="input text-xs py-1" value={form.value} onChange={e => setForm(f => ({ ...f, value: e.target.value }))} />
+          </div>
+          <button className="btn-primary py-1 text-xs shrink-0" onClick={add}><Check size={12} /> Add</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Request Volume Section ───────────────────────────────────────────────────
+
+function RequestVolumeSection({ requests, boardId }) {
+  const [period,  setPeriod]  = useState('monthly')
+  const [view,    setView]    = useState('chart')
+  const [showTgt, setShowTgt] = useState(false)
+  const [targets, setTargets] = useState(() => {
+    const raw = localStorage.getItem(`req_targets_${boardId}`)
+    return raw ? JSON.parse(raw) : []
+  })
+  const tgtBtnRef = useRef(null)
+
+  useEffect(() => {
+    const raw = localStorage.getItem(`req_targets_${boardId}`)
+    setTargets(raw ? JSON.parse(raw) : [])
+    setShowTgt(false)
+  }, [boardId])
 
   const data = useMemo(() => {
     const buckets = {}
@@ -2113,7 +2183,6 @@ function RequestVolumeChart({ requests }) {
         key   = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
         label = d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
       } else {
-        // ISO week — anchor to Monday
         const mon = new Date(d)
         mon.setDate(d.getDate() - ((d.getDay() + 6) % 7))
         key   = mon.toISOString().split('T')[0]
@@ -2126,56 +2195,142 @@ function RequestVolumeChart({ requests }) {
       else buckets[key].open++
       buckets[key].total++
     }
-    return Object.values(buckets).sort((a, b) => a.key.localeCompare(b.key))
-  }, [requests, period])
+    return Object.values(buckets).sort((a, b) => a.key.localeCompare(b.key)).map(p => ({
+      ...p,
+      target: computeTargetForPeriod(p.key, period, targets),
+    }))
+  }, [requests, period, targets])
 
-  const totalReqs = requests.length
-  const openCount = requests.filter(r => !r.status || r.status === 'open').length
+  const totalReqs   = requests.length
+  const openCount   = requests.filter(r => !r.status || r.status === 'open').length
+  const holdCount   = requests.filter(r => r.status === 'on-hold').length
   const closedCount = requests.filter(r => r.status === 'closed').length
+  const hasTargets  = targets.length > 0
 
   return (
-    <div className="px-6 pt-4 pb-3 border-b border-border bg-white/[0.01] shrink-0">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-4">
-          <h3 className="text-xs font-semibold text-text-primary">Request Volume</h3>
-          <div className="flex items-center gap-3 text-[10px] text-text-muted">
-            <span><span className="font-semibold text-text-primary">{totalReqs}</span> total</span>
-            <span><span className="font-semibold text-blue-400">{openCount}</span> open</span>
-            <span><span className="font-semibold text-emerald-400">{closedCount}</span> closed</span>
+    <SectionCard
+      slim
+      title="Request Volume"
+      className="shrink-0 mx-6 mt-4 mb-3"
+      headerRight={
+        <div className="flex items-center gap-1.5">
+          {/* Summary pills */}
+          <div className="flex items-center gap-3 text-[10px] mr-1">
+            <span className="text-text-muted"><span className="font-semibold text-text-primary">{totalReqs}</span> total</span>
+            <span className="text-text-muted"><span className="font-semibold text-blue-400">{openCount}</span> open</span>
+            {holdCount > 0 && <span className="text-text-muted"><span className="font-semibold text-orange-400">{holdCount}</span> on hold</span>}
+            <span className="text-text-muted"><span className="font-semibold text-emerald-400">{closedCount}</span> closed</span>
+          </div>
+          {/* Period toggle */}
+          <div className="flex border border-border rounded-lg overflow-hidden text-xs">
+            {[['weekly', 'Week'], ['monthly', 'Month']].map(([p, lbl]) => (
+              <button key={p} onClick={() => setPeriod(p)}
+                className={`px-2 py-0.5 transition-colors ${period === p ? 'bg-accent/20 text-accent' : 'text-text-muted hover:bg-white/5'}`}>
+                {lbl}
+              </button>
+            ))}
+          </div>
+          {/* Targets icon button */}
+          <button
+            ref={tgtBtnRef}
+            onClick={() => setShowTgt(v => !v)}
+            title={hasTargets ? `Targets (${targets.length})` : 'Targets'}
+            className={`p-1 rounded-lg border transition-colors ${
+              hasTargets || showTgt
+                ? 'border-amber-500/30 text-amber-400 bg-amber-500/10'
+                : 'border-border text-text-muted hover:bg-white/5'
+            }`}
+          >
+            <Target size={13} />
+          </button>
+          {/* Chart / Table toggle */}
+          <div className="flex border border-border rounded-lg overflow-hidden">
+            <button onClick={() => setView('chart')} title="Chart"
+              className={`p-1 transition-colors ${view === 'chart' ? 'bg-accent/20 text-accent' : 'text-text-muted hover:bg-white/5'}`}>
+              <BarChart2 size={13} />
+            </button>
+            <button onClick={() => setView('table')} title="Table"
+              className={`p-1 transition-colors ${view === 'table' ? 'bg-accent/20 text-accent' : 'text-text-muted hover:bg-white/5'}`}>
+              <Table2 size={13} />
+            </button>
           </div>
         </div>
-        <div className="flex gap-1 p-0.5 bg-white/5 rounded-lg">
-          {[['weekly', 'W/W'], ['monthly', 'M/M']].map(([p, label]) => (
-            <button key={p} onClick={() => setPeriod(p)}
-              className={`px-2.5 py-1 rounded-md text-[10px] font-medium transition-colors ${
-                period === p ? 'bg-accent/20 text-accent' : 'text-text-muted hover:text-text-primary'
-              }`}>
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-
+      }
+    >
       {data.length === 0 ? (
         <p className="text-xs text-text-muted/40 text-center py-6">No requests filed yet — add a request to see it plotted here.</p>
+      ) : view === 'chart' ? (
+        <>
+          <div className="relative h-[200px]">
+            {showTgt && (
+              <div className="absolute inset-0 z-10 rounded-lg overflow-hidden">
+                <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setShowTgt(false)} />
+                <div className="absolute top-2 right-2 z-20">
+                  <ReqTargetsPanel targets={targets} setTargets={setTargets} boardId={boardId} onClose={() => setShowTgt(false)} />
+                </div>
+              </div>
+            )}
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={data} margin={{ top: 4, right: 8, left: -24, bottom: 0 }} barSize={period === 'monthly' ? 28 : 16}>
+                <CartesianGrid stroke="#2a2a2e" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                <Tooltip
+                  contentStyle={{ background: 'var(--color-surface,#1f2937)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 11 }}
+                  cursor={{ fill: 'rgba(255,255,255,0.04)' }}
+                  formatter={(val, name) => [val, name === 'onHold' ? 'On Hold' : name.charAt(0).toUpperCase() + name.slice(1)]}
+                />
+                <Bar dataKey="closed" name="Closed"  stackId="a" fill="#22c55e" />
+                <Bar dataKey="onHold" name="On Hold" stackId="a" fill="#f97316" />
+                <Bar dataKey="open"   name="Open"    stackId="a" fill="#3b82f6" radius={[3,3,0,0]} />
+                {hasTargets && (
+                  <Area dataKey="target" name="Target" stroke="#f59e0b" strokeDasharray="5 3" fill="#f59e0b" fillOpacity={0.08} type="stepAfter" connectNulls isAnimationActive={false} />
+                )}
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="flex items-center gap-4 mt-2 text-[10px] text-text-muted">
+            <span className="flex items-center gap-1.5"><span className="w-3 h-2.5 rounded-sm inline-block bg-blue-500" /> Open</span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-2.5 rounded-sm inline-block bg-orange-500" /> On Hold</span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-2.5 rounded-sm inline-block bg-emerald-500" /> Closed</span>
+            {hasTargets && <span className="flex items-center gap-1.5"><span className="w-4 border-t-2 border-dashed border-[#f59e0b] inline-block" /> Target</span>}
+          </div>
+        </>
       ) : (
-        <ResponsiveContainer width="100%" height={150}>
-          <ComposedChart data={data} margin={{ top: 2, right: 8, left: -24, bottom: 0 }} barSize={period === 'monthly' ? 24 : 14}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-            <XAxis dataKey="label" tick={{ fontSize: 9, fill: 'var(--color-text-muted, #9ca3af)' }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted, #9ca3af)' }} axisLine={false} tickLine={false} allowDecimals={false} />
-            <Tooltip
-              contentStyle={{ background: 'var(--color-surface, #1f2937)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 11 }}
-              cursor={{ fill: 'rgba(255,255,255,0.03)' }}
-              formatter={(val, name) => [val, name === 'onHold' ? 'On Hold' : name.charAt(0).toUpperCase() + name.slice(1)]}
-            />
-            <Bar dataKey="closed" name="Closed" stackId="a" fill="#22c55e" />
-            <Bar dataKey="onHold" name="On Hold" stackId="a" fill="#f97316" />
-            <Bar dataKey="open"   name="Open"   stackId="a" fill="#3b82f6" radius={[3, 3, 0, 0]} />
-          </ComposedChart>
-        </ResponsiveContainer>
+        <div className="overflow-auto max-h-[220px]">
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 bg-surface">
+              <tr className="text-[10px] uppercase tracking-wider text-text-muted border-b border-border">
+                <th className="text-left py-2 px-3">Period</th>
+                <th className="text-right py-2 px-3 text-blue-400/70">Open</th>
+                <th className="text-right py-2 px-3 text-orange-400/70">On Hold</th>
+                <th className="text-right py-2 px-3 text-emerald-400/70">Closed</th>
+                <th className="text-right py-2 px-3">Total</th>
+                {hasTargets && <th className="text-right py-2 px-3 text-amber-400/70">Target</th>}
+                {hasTargets && <th className="text-right py-2 px-3">vs Target</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {[...data].reverse().map(row => {
+                const vs = row.target ? Math.round(row.total / row.target * 100) : null
+                const vsColor = vs == null ? '' : vs >= 100 ? 'text-green-400' : vs >= 75 ? 'text-amber-400' : 'text-red-400'
+                return (
+                  <tr key={row.key} className="border-b border-border/30 hover:bg-white/[0.02]">
+                    <td className="py-2 px-3 font-medium text-text-primary">{row.label}</td>
+                    <td className="py-2 px-3 text-right tabular-nums text-blue-400">{row.open || <span className="text-text-muted/30">—</span>}</td>
+                    <td className="py-2 px-3 text-right tabular-nums text-orange-400">{row.onHold || <span className="text-text-muted/30">—</span>}</td>
+                    <td className="py-2 px-3 text-right tabular-nums text-emerald-400">{row.closed || <span className="text-text-muted/30">—</span>}</td>
+                    <td className="py-2 px-3 text-right tabular-nums font-semibold text-text-primary">{row.total}</td>
+                    {hasTargets && <td className="py-2 px-3 text-right tabular-nums text-amber-400">{row.target ?? <span className="text-text-muted/30">—</span>}</td>}
+                    {hasTargets && <td className={`py-2 px-3 text-right tabular-nums font-medium ${vsColor}`}>{vs != null ? `${vs}%` : <span className="text-text-muted/30">—</span>}</td>}
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
-    </div>
+    </SectionCard>
   )
 }
 
@@ -2201,9 +2356,12 @@ function RequestTab({ boardId, cards, doneCards }) {
   const imageInputRef = useRef(null)
   const mcDropRef     = useRef(null)
 
+  // Save only when requests change — boardId intentionally excluded so this never
+  // fires during board navigation (which would write the old board's requests under
+  // the new boardId before the reload effect runs).
   useEffect(() => {
     try { localStorage.setItem(`requests_${boardId}`, JSON.stringify(requests)) } catch { /* storage full */ }
-  }, [requests, boardId])
+  }, [requests]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setRequests(loadRequests(boardId))
@@ -2379,11 +2537,11 @@ function RequestTab({ boardId, cards, doneCards }) {
   return (
     <div className="flex flex-col h-[calc(100vh-130px)]" onKeyDown={handlePanelKey}>
 
-      {/* ── Centerpiece: Request Volume Chart ── */}
-      <RequestVolumeChart requests={requests} />
+      {/* ── Request Volume chart / table ── */}
+      <RequestVolumeSection requests={requests} boardId={boardId} />
 
-      {/* ── Bottom: list + edit panel ── */}
-      <div className="flex flex-1 min-h-0">
+      {/* ── Request list + edit panel ── */}
+      <div className="flex flex-1 min-h-0 border-t border-border">
 
       {/* ── Left: request list ── */}
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
@@ -3129,7 +3287,7 @@ function TimelineTab({ boardId, cards, loading }) {
 
 export default function BoardPage() {
   const { boardId }                                              = useParams()
-  const { admin, accessibleIds, config, loading: accessLoading, getBoardRole } = useAccess()
+  const { admin, accessibleIds, config, loading: accessLoading, getBoardRole, email } = useAccess()
   const { toasts, toast, dismiss }                               = useToast()
 
   const [configMissing, setConfigMissing] = useState(false)
@@ -3143,7 +3301,6 @@ export default function BoardPage() {
   const [loading,          setLoading]          = useState(false)
   const [error,         setError]         = useState(null)
   const [lastRefreshed, setLastRefreshed] = useState(null)
-  const [utilRefresh,   setUtilRefresh]   = useState(0)
 
   // Date range
   const [dateRange,    setDateRange]    = useState(30)      // 7 | 30
@@ -3232,6 +3389,56 @@ export default function BoardPage() {
   const [doneListFilterMode,  setDoneListFilterMode]  = useState('include')
   const [doneLabelFilterMode, setDoneLabelFilterMode] = useState('include')
 
+  // ── Filter persistence (per user, per board, across sessions) ────────────────
+  // filterRestoring prevents the save effect from firing with stale state during restore
+  const filterRestoring = useRef(false)
+  const FILTER_DEFAULTS = {
+    typeFilter: 'all', listFilter: [], listFilterMode: 'include',
+    labelFilter: [], labelFilterMode: 'include', mcFilter: '',
+    doneListFilter: [], doneListFilterMode: 'include',
+    doneLabelFilter: [], doneLabelFilterMode: 'include',
+    dateRange: 30, customRange: null,
+  }
+
+  // Restore saved filters when user or board changes
+  useEffect(() => {
+    if (!email || !boardId) return
+    filterRestoring.current = true
+    try {
+      const saved = JSON.parse(localStorage.getItem(`board_filters_${email}_${boardId}`) || 'null')
+      const f = saved || FILTER_DEFAULTS
+      setTypeFilter(f.typeFilter ?? 'all')
+      setListFilter(new Set(f.listFilter ?? []))
+      setListFilterMode(f.listFilterMode ?? 'include')
+      setLabelFilter(new Set(f.labelFilter ?? []))
+      setLabelFilterMode(f.labelFilterMode ?? 'include')
+      setMcFilter(f.mcFilter ?? '')
+      setDoneListFilter(new Set(f.doneListFilter ?? []))
+      setDoneListFilterMode(f.doneListFilterMode ?? 'include')
+      setDoneLabelFilter(new Set(f.doneLabelFilter ?? []))
+      setDoneLabelFilterMode(f.doneLabelFilterMode ?? 'include')
+      setDateRange(f.dateRange ?? 30)
+      setCustomRange(f.customRange ?? null)
+    } catch { /* corrupt entry — leave current state */ }
+  }, [email, boardId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Save filters whenever they change (skips the first call after a restore)
+  useEffect(() => {
+    if (filterRestoring.current) { filterRestoring.current = false; return }
+    if (!email || !boardId) return
+    try {
+      localStorage.setItem(`board_filters_${email}_${boardId}`, JSON.stringify({
+        typeFilter, listFilter: [...listFilter], listFilterMode,
+        labelFilter: [...labelFilter], labelFilterMode, mcFilter,
+        doneListFilter: [...doneListFilter], doneListFilterMode,
+        doneLabelFilter: [...doneLabelFilter], doneLabelFilterMode,
+        dateRange, customRange,
+      }))
+    } catch { /* storage full */ }
+  }, [email, boardId, typeFilter, listFilter, listFilterMode, labelFilter, labelFilterMode,
+      mcFilter, doneListFilter, doneListFilterMode, doneLabelFilter, doneLabelFilterMode,
+      dateRange, customRange]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Close calendar on outside click
   useEffect(() => {
     function handler(e) { if (calRef.current && !calRef.current.contains(e.target)) setShowCalendar(false) }
@@ -3240,7 +3447,8 @@ export default function BoardPage() {
   }, [])
 
   useEffect(() => {
-    const host = localStorage.getItem('ares_host'), apiKey = localStorage.getItem('ares_api_key')
+    const host = localStorage.getItem('phobos_host') || localStorage.getItem('ares_host'),
+          apiKey = localStorage.getItem('phobos_api_key') || localStorage.getItem('ares_api_key')
     setConfigMissing(!host || !apiKey)
   }, [])
 
@@ -3269,7 +3477,7 @@ export default function BoardPage() {
     if (loadingRef.current && !force) return
     loadingRef.current = true
     const { dateFrom, dateTo } = getEffectiveDateRange(dateRange, customRange)
-    const cacheKey = `ares_cache_${boardId}_${dateFrom}_${dateTo}`
+    const cacheKey = `phobos_cache_${boardId}_${dateFrom}_${dateTo}`
 
     if (!force) {
       try {
@@ -3334,7 +3542,7 @@ export default function BoardPage() {
     setPassMap(new Map())
     setBoardName(config?.boards?.[boardId]?.name || '')
     setLoading(true)
-    setActiveTab('dashboard')
+    setActiveTab('request')
   }, [boardId])
 
   useEffect(() => {
@@ -3688,7 +3896,7 @@ export default function BoardPage() {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4 text-text-muted">
         <AlertTriangle size={32} className="text-amber-400" />
-        <p className="text-sm">Ares API not configured.</p>
+        <p className="text-sm">Phobos API not configured.</p>
         <Link to="/settings" className="btn-primary">Go to Settings</Link>
       </div>
     )
@@ -3711,7 +3919,6 @@ export default function BoardPage() {
     { id: 'request',     label: 'Request',     icon: Inbox },
     { id: 'dashboard',   label: 'Dashboard',   icon: LayoutDashboard },
     { id: 'timeline',    label: 'Timeline',    icon: CalendarDays },
-    ...(boardRole !== 'external' ? [{ id: 'utilization', label: 'Utilization', icon: Users }] : []),
   ]
 
   return (
@@ -3831,15 +4038,6 @@ export default function BoardPage() {
         <TimelineTab boardId={boardId} cards={cards} loading={loading} />
       )}
 
-      {/* ── Utilization tab — always mounted so data survives tab switches ── */}
-      {boardRole !== 'external' && (() => {
-        const { dateFrom: df, dateTo: dt } = getEffectiveDateRange(dateRange, customRange)
-        return (
-          <div className={activeTab !== 'utilization' ? 'hidden' : ''}>
-            <UtilizationTab boardId={boardId} dateFrom={df} dateTo={dt} forceRefresh={utilRefresh} />
-          </div>
-        )
-      })()}
 
       {/* ── Dashboard tab ── */}
       {activeTab === 'dashboard' && (loading

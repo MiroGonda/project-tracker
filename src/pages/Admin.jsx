@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   ShieldCheck, Plus, Trash2, LayoutDashboard,
   Download, Upload, RefreshCw, AlertTriangle, Check, X, AlertCircle,
@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { useAccess } from '../context/AccessContext'
 import { useTheme } from '../context/ThemeContext'
-import { listBoards } from '../api/ares'
+import { listBoards } from '../api/phobos'
 import {
   isGoogleConfigured, isGoogleConnected, getGoogleEmail,
   connectGoogle, disconnectGoogle,
@@ -60,16 +60,29 @@ function AddEmailInput({ onAdd, placeholder = 'user@example.com' }) {
 }
 
 export default function Admin() {
-  const { config, updateConfig, canAdmin, email, reload } = useAccess()
+  const { config, updateConfig, canAdmin, email, reload, loading } = useAccess()
   const { isDark, toggleTheme } = useTheme()
   const { toasts, toast, dismiss } = useToast()
 
-  // Backend API config state (moved from Settings)
-  const [raintoolHost, setRaintoolHost] = useState(() => localStorage.getItem('raintool_host') || 'https://hailstorm.frostdesigngroup.com')
+  // Backend API config state — initialised from localStorage (seeded by AccessContext from Firestore)
+  const [phobosHost,   setPhobosHost]   = useState(() => localStorage.getItem('phobos_host')    || localStorage.getItem('ares_host')    || '')
+  const [phobosApiKey, setPhobosApiKey] = useState(() => localStorage.getItem('phobos_api_key') || localStorage.getItem('ares_api_key') || '')
+  const [raintoolHost, setRaintoolHost] = useState(() => localStorage.getItem('raintool_host')  || 'https://hailstorm.frostdesigngroup.com')
   const [trelloApiKey, setTrelloApiKey] = useState(() => localStorage.getItem('trello_api_key') || '')
   const [trelloToken,  setTrelloToken]  = useState(() => localStorage.getItem('trello_token')   || '')
-  const [runnApiKey,   setRunnApiKey]   = useState(() => localStorage.getItem('runn_api_key')   || '')
-  const [utilApiUrl,   setUtilApiUrl]   = useState(() => localStorage.getItem('util_api_url')   || '')
+
+  // One-time sync from Firestore once config loads (handles first-time load before localStorage is seeded)
+  const svcInitialized = useRef(false)
+  useEffect(() => {
+    if (svcInitialized.current || !config?.services) return
+    svcInitialized.current = true
+    const svc = config.services
+    if (svc.phobosHost   || svc.aresHost)   setPhobosHost(svc.phobosHost   || svc.aresHost)
+    if (svc.phobosApiKey || svc.aresApiKey) setPhobosApiKey(svc.phobosApiKey || svc.aresApiKey)
+    if (svc.raintoolHost) setRaintoolHost(svc.raintoolHost)
+    if (svc.trelloApiKey) setTrelloApiKey(svc.trelloApiKey)
+    if (svc.trelloToken)  setTrelloToken(svc.trelloToken)
+  }, [config])
 
   // Google auth state
   const [googleConnected, setGoogleConnected] = useState(isGoogleConnected)
@@ -90,10 +103,10 @@ export default function Admin() {
   }, [config])
 
   const fetchBoards = useCallback(() => {
-    const host = localStorage.getItem('ares_host')
-    const key  = localStorage.getItem('ares_api_key')
+    const host = localStorage.getItem('phobos_host')   || localStorage.getItem('ares_host')
+    const key  = localStorage.getItem('phobos_api_key') || localStorage.getItem('ares_api_key')
     if (!host || !key) {
-      setBoardsError('Ares Host and API Key are not set. Go to Settings and save them first.')
+      setBoardsError('Phobos Host and API Key are not set. Save them in Backend Services below.')
       return
     }
     setBoardsLoading(true)
@@ -109,7 +122,7 @@ export default function Admin() {
       .finally(() => setBoardsLoading(false))
   }, [])
 
-  useEffect(() => { fetchBoards() }, [fetchBoards])
+  useEffect(() => { if (!loading) fetchBoards() }, [fetchBoards, loading])
 
   if (!canAdmin) {
     return (
@@ -197,11 +210,20 @@ export default function Admin() {
   // ── Backend API config actions ─────────────────────────────────────────────
 
   function saveBackendConfig() {
-    localStorage.setItem('raintool_host',  raintoolHost.trim())
-    localStorage.setItem('trello_api_key', trelloApiKey.trim())
-    localStorage.setItem('trello_token',   trelloToken.trim())
-    localStorage.setItem('runn_api_key',   runnApiKey.trim())
-    localStorage.setItem('util_api_url',   utilApiUrl.trim())
+    const services = {
+      phobosHost:   phobosHost.trim(),
+      phobosApiKey: phobosApiKey.trim(),
+      raintoolHost: raintoolHost.trim(),
+      trelloApiKey: trelloApiKey.trim(),
+      trelloToken:  trelloToken.trim(),
+    }
+    updateConfig({ ...config, services })
+    // Seed localStorage immediately so the current session works right away
+    localStorage.setItem('phobos_host',    services.phobosHost)
+    localStorage.setItem('phobos_api_key', services.phobosApiKey)
+    localStorage.setItem('raintool_host',  services.raintoolHost)
+    localStorage.setItem('trello_api_key', services.trelloApiKey)
+    localStorage.setItem('trello_token',   services.trelloToken)
     toast.success('Backend configuration saved.')
   }
 
@@ -282,8 +304,18 @@ export default function Admin() {
 
         {/* ── Backend Services ── */}
         <Section title="Backend Services"
-          description="Integration credentials stored locally in your browser. Required for Utilization and Pass Tracking features.">
+          description="Shared credentials saved to Firestore — set once and all users receive them automatically.">
           <div className="flex flex-col gap-3">
+            <div>
+              <label className="block text-xs text-text-muted mb-1">Phobos Host</label>
+              <input className="input" placeholder="https://phobos.example.com"
+                value={phobosHost} onChange={e => setPhobosHost(e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-xs text-text-muted mb-1 flex items-center gap-1"><Key size={11} /> Phobos API Key</label>
+              <input className="input" type="password" placeholder="••••••••••••"
+                value={phobosApiKey} onChange={e => setPhobosApiKey(e.target.value)} />
+            </div>
             <div>
               <label className="block text-xs text-text-muted mb-1">Raintool Host</label>
               <input className="input" placeholder="https://hailstorm.frostdesigngroup.com"
@@ -300,23 +332,6 @@ export default function Admin() {
                 value={trelloToken} onChange={e => setTrelloToken(e.target.value)} />
               <p className="text-xs text-text-muted mt-1">
                 Generate at: <code className="text-accent">trello.com/1/authorize?expiration=never&scope=read,write&response_type=token&key=YOUR_KEY</code>
-              </p>
-            </div>
-            <div>
-              <label className="block text-xs text-text-muted mb-1 flex items-center gap-1"><Key size={11} /> Runn API Key</label>
-              <input className="input" type="password" placeholder="••••••••••••"
-                value={runnApiKey} onChange={e => setRunnApiKey(e.target.value)} />
-              <p className="text-xs text-text-muted mt-1">
-                Found under <strong>Settings → API</strong> in your Runn app.
-                Forwarded as <code className="text-accent">X-Runn-Api-Key</code> to the backend.
-              </p>
-            </div>
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Utilization API URL</label>
-              <input className="input" placeholder="https://your-backend.railway.app"
-                value={utilApiUrl} onChange={e => setUtilApiUrl(e.target.value)} />
-              <p className="text-xs text-text-muted mt-1">
-                Base URL of the utilization backend (proxies Runn + Ares cycle-time calls).
               </p>
             </div>
             <button className="btn-primary w-fit" onClick={saveBackendConfig}>
@@ -385,11 +400,11 @@ export default function Admin() {
 
         {/* ── Project Access ── */}
         <Section title="Project Access"
-          description="Assign Frost Users (full board access) and External Users (no Utilization tab) per board.">
+          description="Assign Frost Users (full board access) and External Users (board access only) per board.">
 
           {boardsLoading && (
             <div className="flex items-center gap-2 text-text-muted text-xs mb-3">
-              <Spinner size={12} /> Loading boards from Ares API…
+              <Spinner size={12} /> Loading boards from Phobos API…
             </div>
           )}
 

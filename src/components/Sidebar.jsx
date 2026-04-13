@@ -5,7 +5,7 @@ import {
   LayoutDashboard,
 } from 'lucide-react'
 import { useAccess } from '../context/AccessContext'
-import { listBoards } from '../api/ares'
+import { listBoards } from '../api/phobos'
 import Spinner from './Spinner'
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
@@ -22,8 +22,8 @@ export default function Sidebar() {
     || [...accessibleIds].some(id => { const r = getBoardRole(id); return r === 'frost' || r === 'admin' })
 
   useEffect(() => {
-    const host   = localStorage.getItem('ares_host')
-    const apiKey = localStorage.getItem('ares_api_key')
+    const host   = localStorage.getItem('phobos_host')   || localStorage.getItem('ares_host')
+    const apiKey = localStorage.getItem('phobos_api_key') || localStorage.getItem('ares_api_key')
     if (!host || !apiKey) return
     setBoardsLoading(true)
     listBoards().then(setApiBoards).catch(() => {}).finally(() => setBoardsLoading(false))
@@ -58,9 +58,9 @@ export default function Sidebar() {
     >
       {/* Logo */}
       <div className="flex items-center gap-2 px-4 py-4 border-b border-border">
-        <span className="text-accent font-bold text-lg leading-none">A</span>
+        <span className="text-accent font-bold text-lg leading-none">P</span>
         {!collapsed && (
-          <span className="text-sm font-semibold text-text-primary tracking-wide">Ares</span>
+          <span className="text-sm font-semibold text-text-primary tracking-wide">Phobos</span>
         )}
       </div>
 

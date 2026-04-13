@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Sun, Moon, CheckCircle2, Circle, Save, Eye, EyeOff, Key, Layers, X, Settings as SettingsIcon, Plus, UserX } from 'lucide-react'
+import { Sun, Moon, CheckCircle2, Circle, Eye, EyeOff, Layers, X, Settings as SettingsIcon, Plus, UserX } from 'lucide-react'
 import { useTheme } from '../context/ThemeContext'
 import { useAccess } from '../context/AccessContext'
 import {
@@ -8,9 +8,8 @@ import {
   connectGoogle,
   disconnectGoogle,
 } from '../api/google'
-import { listBoards, listRaintoolProjects } from '../api/ares'
+import { listBoards, listRaintoolProjects } from '../api/phobos'
 import { fetchBoardCustomFields, createCustomField } from '../api/trello'
-import { getRunnProjects, isUtilApiConfigured } from '../api/runn'
 import Toast from '../components/Toast'
 import useToast from '../hooks/useToast'
 import Spinner from '../components/Spinner'
@@ -94,35 +93,19 @@ function ProjectPicker({ projects, loading, error, selected, onSelect, onClear, 
 // ─── Per-board integrations modal ─────────────────────────────────────────────
 
 function BoardIntegrationsModal({ board, onClose }) {
-  const [runnProject, setRunnProject] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(`runn_project_${board.id}`) || 'null') } catch { return null }
-  })
   const [rtProject, setRtProject] = useState(() => {
     try { return JSON.parse(localStorage.getItem(`rt_project_${board.id}`) || 'null') } catch { return null }
   })
-  const [runnProjects, setRunnProjects] = useState([])
-  const [rtProjects,   setRtProjects]   = useState([])
-  const [runnLoading,  setRunnLoading]  = useState(true)
-  const [rtLoading,    setRtLoading]    = useState(true)
-  const [runnError,    setRunnError]    = useState(null)
-  const [rtError,      setRtError]      = useState(null)
+  const [rtProjects, setRtProjects] = useState([])
+  const [rtLoading,  setRtLoading]  = useState(true)
+  const [rtError,    setRtError]    = useState(null)
 
   useEffect(() => {
-    getRunnProjects()
-      .then(setRunnProjects)
-      .catch(e => setRunnError(e.response?.data?.detail || e.message))
-      .finally(() => setRunnLoading(false))
     listRaintoolProjects()
       .then(setRtProjects)
       .catch(e => setRtError(e.message))
       .finally(() => setRtLoading(false))
   }, [])
-
-  function selectRunn(p) {
-    setRunnProject(p)
-    if (p) localStorage.setItem(`runn_project_${board.id}`, JSON.stringify(p))
-    else   localStorage.removeItem(`runn_project_${board.id}`)
-  }
 
   function selectRt(p) {
     setRtProject(p)
@@ -147,20 +130,8 @@ function BoardIntegrationsModal({ board, onClose }) {
         </div>
 
         <div className="flex flex-col gap-2">
-          <p className="text-xs font-medium text-text-primary">Runn Project</p>
-          <p className="text-[11px] text-text-muted">Scopes the Utilization report to this project.</p>
-          <ProjectPicker
-            projects={runnProjects} loading={runnLoading} error={runnError}
-            selected={runnProject} onSelect={selectRunn} onClear={() => selectRunn(null)}
-            clearLabel="— All projects (org-wide)"
-          />
-        </div>
-
-        <div className="border-t border-border/60" />
-
-        <div className="flex flex-col gap-2">
           <p className="text-xs font-medium text-text-primary">Raintool Project</p>
-          <p className="text-[11px] text-text-muted">Source for Utilization actuals and Dashboard cycle time.</p>
+          <p className="text-[11px] text-text-muted">Source for Dashboard cycle time data.</p>
           <ProjectPicker
             projects={rtProjects} loading={rtLoading} error={rtError}
             selected={rtProject} onSelect={selectRt} onClear={() => selectRt(null)}
@@ -212,7 +183,7 @@ function ExternalUserManager({ boardId, config, updateConfig }) {
     <div className="mt-3 pt-3 border-t border-border/50">
       <p className="text-[10px] font-medium text-amber-400 flex items-center gap-1 mb-2">
         <UserX size={10} /> External Users
-        <span className="text-text-muted font-normal ml-1">— board access, no Utilization</span>
+        <span className="text-text-muted font-normal ml-1">— board access only</span>
       </p>
       <div className="flex flex-wrap gap-1.5 mb-2">
         {extUsers.length === 0
@@ -240,10 +211,6 @@ export default function Settings() {
   const { isDark, toggleTheme }    = useTheme()
   const { refreshEmail, admin, getBoardRole, accessibleIds, config, updateConfig, email, loading: configLoading } = useAccess()
   const { toasts, toast, dismiss } = useToast()
-
-  // Ares connection (needed by all users)
-  const [aresHost,   setAresHost]   = useState(() => localStorage.getItem('ares_host')    || '')
-  const [aresApiKey, setAresApiKey] = useState(() => localStorage.getItem('ares_api_key') || '')
 
   // Google auth
   const [googleConnected, setGoogleConnected] = useState(isGoogleConnected)
@@ -274,14 +241,15 @@ export default function Settings() {
   }, [])
 
   useEffect(() => {
-    const host = localStorage.getItem('ares_host')
-    const key  = localStorage.getItem('ares_api_key')
+    if (configLoading) return
+    const host = localStorage.getItem('phobos_host')   || localStorage.getItem('ares_host')
+    const key  = localStorage.getItem('phobos_api_key') || localStorage.getItem('ares_api_key')
     if (!host || !key) return
     listBoards().then(boards => {
       const seen = new Set()
       setAllBoards(boards.filter(b => { if (seen.has(b.id)) return false; seen.add(b.id); return true }))
     }).catch(() => {})
-  }, [])
+  }, [configLoading])
 
   // Boards this user can configure (admin sees all, frost sees their boards)
   const configurableBoards = admin
@@ -300,12 +268,6 @@ export default function Settings() {
       localStorage.setItem('hidden_board_ids', JSON.stringify([...next]))
       return next
     })
-  }
-
-  function saveAresConfig() {
-    localStorage.setItem('ares_host',    aresHost.trim())
-    localStorage.setItem('ares_api_key', aresApiKey.trim())
-    toast.success('Connection settings saved.')
   }
 
   function handleConnect() {
@@ -371,32 +333,6 @@ export default function Settings() {
       <div className="max-w-xl mx-auto px-6 py-8">
         <h1 className="text-base font-semibold text-text-primary mb-6">Settings</h1>
 
-        {/* ── Ares Connection ── */}
-        <Section
-          title="Ares Connection"
-          description="Connect to the Ares API. Credentials are stored locally in your browser."
-        >
-          <div className="flex flex-col gap-3">
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Ares Host</label>
-              <input className="input" placeholder="https://my-ares.example.com"
-                value={aresHost} onChange={e => setAresHost(e.target.value)} />
-            </div>
-            <div>
-              <label className="block text-xs text-text-muted mb-1 flex items-center gap-1">
-                <Key size={11} /> Ares API Key
-              </label>
-              <input className="input" type="password" placeholder="••••••••••••"
-                value={aresApiKey} onChange={e => setAresApiKey(e.target.value)} />
-            </div>
-            <button className="btn-primary w-fit" onClick={saveAresConfig}>
-              <Save size={13} /> Save
-            </button>
-          </div>
-        </Section>
-
-        <Divider />
-
         {/* ── Google Auth ── */}
         <Section
           title="Google Account"
@@ -439,7 +375,7 @@ export default function Settings() {
           {configurableBoards.length === 0 ? (
             <p className="text-xs text-text-muted italic">
               {allBoards.length === 0
-                ? 'No boards found. Check your Ares connection above.'
+                ? 'No boards found. Check your Phobos connection in Admin.'
                 : 'No boards assigned to your account.'}
             </p>
           ) : (
@@ -449,9 +385,8 @@ export default function Settings() {
                 const passEnabled = !!passConfig[b.id]?.enabled
                 const passLoading = passSetupLoading.has(b.id)
                 const canEnablePass = !!(trelloApiKey && trelloToken)
-                const runnProj = (() => { try { return JSON.parse(localStorage.getItem(`runn_project_${b.id}`) || 'null') } catch { return null } })()
-                const rtProj   = (() => { try { return JSON.parse(localStorage.getItem(`rt_project_${b.id}`)   || 'null') } catch { return null } })()
-                const hasIntegrations = !!(runnProj || rtProj)
+                const rtProj   = (() => { try { return JSON.parse(localStorage.getItem(`rt_project_${b.id}`) || 'null') } catch { return null } })()
+                const hasIntegrations = !!rtProj
                 const isFrost = !admin && getBoardRole(b.id) === 'frost'
                 return (
                   <div key={b.id} className={`rounded-lg border transition-colors ${hidden ? 'border-border/50 opacity-50' : 'border-border bg-white/[0.02]'}`}>
@@ -483,19 +418,17 @@ export default function Settings() {
                           </button>
                         )}
                         {/* Integrations cog */}
-                        {isUtilApiConfigured() && (
-                          <button
-                            onClick={() => setIntegrationsFor(b)}
-                            className={`p-1.5 rounded-lg border text-[10px] transition-colors ${
-                              hasIntegrations
-                                ? 'border-indigo-500/30 text-indigo-400 bg-indigo-500/5 hover:bg-indigo-500/10'
-                                : 'border-border text-text-muted hover:bg-white/5'
-                            }`}
-                            title={hasIntegrations ? 'Edit integrations' : 'Configure integrations'}
-                          >
-                            <SettingsIcon size={11} />
-                          </button>
-                        )}
+                        <button
+                          onClick={() => setIntegrationsFor(b)}
+                          className={`p-1.5 rounded-lg border text-[10px] transition-colors ${
+                            hasIntegrations
+                              ? 'border-indigo-500/30 text-indigo-400 bg-indigo-500/5 hover:bg-indigo-500/10'
+                              : 'border-border text-text-muted hover:bg-white/5'
+                          }`}
+                          title={hasIntegrations ? 'Edit integrations' : 'Configure integrations'}
+                        >
+                          <SettingsIcon size={11} />
+                        </button>
                         {/* Hide toggle — admin only */}
                         {admin && (
                           <button
