@@ -34,13 +34,14 @@ export default function Sidebar() {
     const seen = new Set()
     const result = []
 
-    // Ares boards from API
+    // Ares boards from API — use config.boards source if set (manual overrides ares)
     for (const b of apiBoards) {
       const id = b.id || b.boardId
       if (!id || seen.has(id)) continue
       seen.add(id)
       if (hiddenIds.has(id)) continue
-      if (admin || accessibleIds.has(id)) result.push({ ...b, source: 'ares' })
+      const source = config?.boards?.[id]?.source || 'ares'
+      if (admin || accessibleIds.has(id)) result.push({ ...b, source })
     }
 
     // Manual boards from config (not returned by the Phobos API)

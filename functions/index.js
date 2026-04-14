@@ -233,7 +233,7 @@ async function fetchCards(shortBoardId, key, token) {
   }))
 }
 
-async function fetchActions(shortBoardId, key, token) {
+async function fetchActions(shortBoardId, key, token, since = null) {
   const allActions = []
   const limit = 1000
   let before = null
@@ -241,6 +241,7 @@ async function fetchActions(shortBoardId, key, token) {
   while (true) {
     const params = { filter: 'updateCard:idList', limit: String(limit), fields: 'date,data' }
     if (before) params.before = before
+    if (since)  params.since  = since
     const r = await fetch(`${TRELLO_BASE}/boards/${shortBoardId}/actions?${qs(key, token, params)}`)
     if (!r.ok) throw new Error(`Trello actions ${r.status}: ${await r.text()}`)
     const batch = await r.json()
@@ -256,9 +257,17 @@ async function fetchActions(shortBoardId, key, token) {
 // ─── Core sync logic ───────────────────────────────────────────────────────────
 
 async function syncBoard(boardId, trelloShortId, key, token) {
-  const [allCards, actions] = await Promise.all([
+  // Load existing cache — used to seed maps for incremental action merging
+  const cacheRef  = db.doc(`cache/manual_${boardId}`)
+  const cacheSnap = await cacheRef.get()
+  const existing  = cacheSnap.exists() ? cacheSnap.data() : null
+  const since     = existing?.lastActionDate || null
+
+  // Fetch cards (always full — we need current board state) +
+  // only actions newer than the last sync (full history on first run)
+  const [allCards, newActions] = await Promise.all([
     fetchCards(trelloShortId, key, token),
-    fetchActions(trelloShortId, key, token),
+    fetchActions(trelloShortId, key, token, since),
   ])
 
   // Split by LANE_MAP — mirrors BoardPage.jsx getLaneInfo() logic
@@ -268,28 +277,28 @@ async function syncBoard(boardId, trelloShortId, key, token) {
   })
   const doneCards = allCards.filter(c => LANE_MAP[c.currentList]?.status === 'Done')
 
-  // Build completion map: cardId → most recent ISO date moved to a Done lane
-  const completionMap = new Map()
-  for (const a of actions) {
-    const toList = a.data?.listAfter?.name || ''
-    if (LANE_MAP[toList]?.status !== 'Done') continue
-    const cardId = a.data?.card?.id
-    const date   = a.date
-    if (!cardId || !date) continue
-    const ex = completionMap.get(cardId)
-    if (!ex || new Date(date) > new Date(ex)) completionMap.set(cardId, date)
-  }
+  // Seed maps from existing cache, then layer in new actions
+  const completionMap    = new Map(Object.entries(existing?.completionDates || {}))
+  const firstActivatedAt = new Map(Object.entries(existing?.activatedDates  || {}))
 
-  // Build first-activation map: cardId → earliest ISO date moved OUT of a Pending lane
-  const firstActivatedAt = new Map()
-  for (const a of actions) {
+  for (const a of newActions) {
+    const toList   = a.data?.listAfter?.name  || ''
     const fromList = a.data?.listBefore?.name || ''
-    if (LANE_MAP[fromList]?.status !== 'Pending') continue
-    const cardId = a.data?.card?.id
-    const date   = a.date
+    const cardId   = a.data?.card?.id
+    const date     = a.date
     if (!cardId || !date) continue
-    const ex = firstActivatedAt.get(cardId)
-    if (!ex || new Date(date) < new Date(ex)) firstActivatedAt.set(cardId, date)
+
+    // Completion: keep the most recent move to a Done lane
+    if (LANE_MAP[toList]?.status === 'Done') {
+      const ex = completionMap.get(cardId)
+      if (!ex || new Date(date) > new Date(ex)) completionMap.set(cardId, date)
+    }
+
+    // First activation: keep the earliest move out of a Pending lane
+    if (LANE_MAP[fromList]?.status === 'Pending') {
+      const ex = firstActivatedAt.get(cardId)
+      if (!ex || new Date(date) < new Date(ex)) firstActivatedAt.set(cardId, date)
+    }
   }
 
   // Cycle days = completion − first activation
@@ -301,26 +310,37 @@ async function syncBoard(boardId, trelloShortId, key, token) {
     if (days >= 0) cycleDays[cardId] = Math.round(days * 10) / 10
   }
 
-  // Write processed payload to Firestore — onSnapshot on the frontend picks this up immediately
-  await db.doc(`cache/manual_${boardId}`).set({
+  // Advance the cursor: use the date of the most recent new action so the next
+  // sync only fetches actions that arrived after this one.
+  const lastActionDate = newActions.length > 0
+    ? newActions[0].date                   // actions are newest-first
+    : (existing?.lastActionDate || null)
+
+  await cacheRef.set({
     activeCards,
     doneCards,
-    completionDates: [...completionMap],    // Map → [[cardId, iso], …]
-    activatedDates:  [...firstActivatedAt], // kept for future incremental use
+    completionDates: Object.fromEntries(completionMap),
+    activatedDates:  Object.fromEntries(firstActivatedAt),
     cycleDays,
-    updatedAt:     admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt:      admin.firestore.FieldValue.serverTimestamp(),
+    lastActionDate,
     boardId,
     trelloShortId,
   })
 
-  return { activeCount: activeCards.length, doneCount: doneCards.length }
+  return {
+    activeCount: activeCards.length,
+    doneCount:   doneCards.length,
+    newActions:  newActions.length,
+    incremental: !!since,
+  }
 }
 
 // ─── HTTP trigger — called by the frontend refresh button ─────────────────────
 // URL: https://us-central1-phobos-9246e.cloudfunctions.net/syncBoardHttp?boardId=<id>
 
 exports.syncBoardHttp = onRequest(
-  { secrets: [TRELLO_KEY, TRELLO_TOKEN], region: 'us-central1', cors: true },
+  { secrets: [TRELLO_KEY, TRELLO_TOKEN], region: 'us-central1', cors: true, invoker: 'public' },
   async (req, res) => {
     const key   = TRELLO_KEY.value()
     const token = TRELLO_TOKEN.value()

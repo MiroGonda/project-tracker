@@ -34,6 +34,9 @@ export function deleteRequest(boardId, requestId) {
 export async function migrateLocalRequests(boardId) {
   try {
     const raw = localStorage.getItem(`requests_${boardId}`)
+    // Remove the key immediately — before any async work — so a second call
+    // (e.g. after the user deletes all Firestore requests) can never re-apply stale data.
+    localStorage.removeItem(`requests_${boardId}`)
     const local = raw ? JSON.parse(raw) : []
     if (!local.length) return
 
@@ -46,7 +49,6 @@ export async function migrateLocalRequests(boardId) {
       }))
       await Promise.all(normalized.map(r => setDoc(ref(boardId, r.id), r)))
     }
-    localStorage.removeItem(`requests_${boardId}`)
   } catch (e) {
     console.error('migrateLocalRequests:', e)
   }
