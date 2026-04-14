@@ -14,9 +14,11 @@ import {
 } from 'lucide-react'
 import { boardCards, boardMovements, boardSummary, cycleTime } from '../api/phobos'
 import { subscribeRequests, saveRequest, deleteRequest, migrateLocalRequests } from '../api/requests'
-import { fetchBoardLabels, createBoardLabel, addLabelToCard, deleteCard, setCardDue, fetchBoardCardsWithFields, setCardCustomField } from '../api/trello'
+import { fetchBoardLabels, createBoardLabel, addLabelToCard, deleteCard, setCardDue, fetchBoardCardsWithFields, setCardCustomField, fetchTrelloBoardCards, fetchBoardActions } from '../api/trello'
 import { getPassConfigForBoard } from './Settings'
 import { useAccess } from '../context/AccessContext'
+import { db } from '../firebase'
+import { doc, onSnapshot } from 'firebase/firestore'
 import Spinner from '../components/Spinner'
 import Toast from '../components/Toast'
 import useToast from '../hooks/useToast'
@@ -3279,6 +3281,11 @@ export default function BoardPage() {
   const { admin, accessibleIds, config, loading: accessLoading, getBoardRole, email } = useAccess()
   const { toasts, toast, dismiss }                               = useToast()
 
+  // Board source — drives which data path (Phobos/Ares vs. direct Trello) we use
+  const boardCfg      = config?.boards?.[boardId] || {}
+  const isManualBoard = boardCfg.source === 'manual'
+  const trelloShortId = boardCfg.trelloShortId || null
+
   const [configMissing, setConfigMissing] = useState(false)
   const [boardName,     setBoardName]     = useState(() => config?.boards?.[boardId]?.name || '')
   const [cards,         setCards]         = useState([])
@@ -3332,6 +3339,11 @@ export default function BoardPage() {
   const [requests,        setRequests]        = useState([])
   const [requestsLoading, setRequestsLoading] = useState(true)
 
+  // ── Manual board computed data — populated from Firestore cache written by Cloud Function ──
+  const [manualCompletionDates, setManualCompletionDates] = useState(new Map()) // cardId → ISO completion date
+  const [manualCycleDays,       setManualCycleDays]       = useState({})        // cardId → days (number)
+  const [syncing,               setSyncing]               = useState(false)     // manual refresh in-flight
+
   useEffect(() => {
     if (!boardId) return
     setRequestsLoading(true)
@@ -3358,6 +3370,7 @@ export default function BoardPage() {
   // Cycle time map: card identifier → days (for Done cards table)
   // Store under every possible identifier so any field on the card object can match
   const cycleTimeMap = useMemo(() => {
+    if (isManualBoard) return manualCycleDays
     const map = {}
     for (const r of cycleTimeData) {
       const days = extractCycleDays(r)
@@ -3367,16 +3380,21 @@ export default function BoardPage() {
       }
     }
     return map
-  }, [cycleTimeData])
+  }, [isManualBoard, manualCycleDays, cycleTimeData])
 
   const cycleTimeP85 = useMemo(() => {
+    if (isManualBoard) {
+      const days = Object.values(manualCycleDays).filter(d => d != null && !isNaN(d)).sort((a, b) => a - b)
+      if (!days.length) return null
+      return days[Math.floor(days.length * 0.85)]
+    }
     const hours = cycleTimeData
       .map(r => r.cycleHours != null ? Number(r.cycleHours) : null)
       .filter(h => h != null && !isNaN(h))
       .sort((a, b) => a - b)
     if (!hours.length) return null
     return hours[Math.floor(hours.length * 0.85)] / 24
-  }, [cycleTimeData])
+  }, [isManualBoard, manualCycleDays, cycleTimeData])
 
   // Filters (lifted — affect KPIs + throughput)
   const [typeFilter,      setTypeFilter]      = useState('all')
@@ -3452,10 +3470,11 @@ export default function BoardPage() {
   }, [])
 
   useEffect(() => {
-    const host = localStorage.getItem('phobos_host') || localStorage.getItem('ares_host'),
-          apiKey = localStorage.getItem('phobos_api_key') || localStorage.getItem('ares_api_key')
+    if (isManualBoard) { setConfigMissing(false); return }
+    const host   = localStorage.getItem('phobos_host')   || localStorage.getItem('ares_host')
+    const apiKey = localStorage.getItem('phobos_api_key') || localStorage.getItem('ares_api_key')
     setConfigMissing(!host || !apiKey)
-  }, [])
+  }, [isManualBoard])
 
   useEffect(() => {
     if (config?.boards?.[boardId]?.name) setBoardName(config.boards[boardId].name)
@@ -3535,6 +3554,67 @@ export default function BoardPage() {
     } finally { setLoading(false); loadingRef.current = false }
   }, [boardId, dateRange, customRange, configMissing, loadCycleTime])
 
+  /**
+   * Manual-board data loader — calls Trello directly using trelloShortId.
+   * Triggers the Cloud Function to re-fetch this board from Trello and write
+   * updated data to Firestore. The onSnapshot listener below picks up the result
+   * automatically — no polling needed.
+   *
+   * URL is the gen-1 Firebase Functions HTTPS trigger for this project.
+   */
+  const SYNC_URL = 'https://us-central1-phobos-9246e.cloudfunctions.net/syncBoardHttp'
+
+  const triggerManualSync = useCallback(async () => {
+    if (syncing || !boardId) return
+    setSyncing(true)
+    setError(null)
+    try {
+      const r    = await fetch(`${SYNC_URL}?boardId=${boardId}`)
+      const data = await r.json()
+      if (!data.ok) throw new Error(data.error || 'Sync failed')
+      // onSnapshot fires automatically when the function writes to Firestore
+    } catch (e) {
+      toast.error(`Sync error: ${e.message}`)
+    } finally {
+      setSyncing(false)
+    }
+  }, [boardId, syncing])
+
+  // Subscribe to Firestore cache written by the Cloud Function.
+  // Fires immediately with existing cached data, then re-fires on every sync.
+  useEffect(() => {
+    if (!isManualBoard || !boardId) return
+    if (!trelloShortId) { setLoading(false); return }
+
+    setLoading(true)
+    const unsub = onSnapshot(
+      doc(db, 'cache', `manual_${boardId}`),
+      (snap) => {
+        if (!snap.exists()) {
+          // Cloud Function hasn't run yet — show empty board, user can click refresh to sync
+          setLoading(false)
+          return
+        }
+        const data = snap.data()
+        setCards(data.activeCards || [])
+        setDoneCards(data.doneCards || [])
+        setMovements([])
+        setManualCompletionDates(new Map(data.completionDates || []))
+        setManualCycleDays(data.cycleDays || {})
+        setLastRefreshed(data.updatedAt?.toDate() || null)
+        setCycleTimeLoading(false)
+        setCycleTimeFetched(true)
+        setLoading(false)
+      },
+      (err) => {
+        console.error('Manual board snapshot error:', err)
+        setError(err.message)
+        setLoading(false)
+      },
+    )
+    return unsub
+  }, [boardId, isManualBoard, trelloShortId])
+
   // Immediately clear stale board data when navigating to a new board
   useEffect(() => {
     setCards([])
@@ -3543,6 +3623,9 @@ export default function BoardPage() {
     setCycleTimeData([])
     setCycleTimeLoading(false)
     setCycleTimeFetched(false)
+    setManualCompletionDates(new Map())
+    setManualCycleDays({})
+    setSyncing(false)
     setError(null)
     setPassMap(new Map())
     setBoardName(config?.boards?.[boardId]?.name || '')
@@ -3552,8 +3635,8 @@ export default function BoardPage() {
 
   useEffect(() => {
     loadingRef.current = false // reset on board/range change so new fetch is always allowed
-    if (!configMissing) loadData()
-  }, [boardId, dateRange, customRange, configMissing])
+    if (!isManualBoard && !configMissing) loadData()
+  }, [boardId, dateRange, customRange, configMissing, isManualBoard])
 
   // Load pass dates from Trello custom fields when pass tracking is enabled
   useEffect(() => {
@@ -3626,7 +3709,10 @@ export default function BoardPage() {
   const filteredActiveCards = useMemo(() => applyActiveFilters(cards),     [cards, listFilter, labelFilter, typeFilter, mcFilter])
   const filteredDoneCards   = useMemo(() => applyActiveFilters(doneCards),  [doneCards, listFilter, labelFilter, typeFilter, mcFilter])
 
-  const completionDateMap = useMemo(() => buildCompletionDateMap(movements), [movements])
+  const completionDateMap = useMemo(
+    () => isManualBoard ? manualCompletionDates : buildCompletionDateMap(movements),
+    [isManualBoard, manualCompletionDates, movements],
+  )
 
   const cutoffFilteredDoneCards = useMemo(() =>
     filteredDoneCards.filter(c => {
@@ -3897,6 +3983,17 @@ export default function BoardPage() {
 
   // ── Render guards ─────────────────────────────────────────────────────────
 
+  if (isManualBoard && !trelloShortId) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-4 text-text-muted">
+        <AlertTriangle size={32} className="text-amber-400" />
+        <p className="text-sm">No Trello board configured for this project.</p>
+        <p className="text-xs text-text-muted/60">Set the Trello Short Board ID in Admin to load data.</p>
+        <Link to="/admin" className="btn-primary">Go to Admin</Link>
+      </div>
+    )
+  }
+
   if (configMissing) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4 text-text-muted">
@@ -4001,8 +4098,8 @@ export default function BoardPage() {
                   </div>
                 )}
               </div>
-              <button className="btn-secondary py-1" onClick={() => { loadData(true); setUtilRefresh(n => n + 1) }} disabled={loading}>
-                <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+              <button className="btn-secondary py-1" onClick={() => { isManualBoard ? triggerManualSync() : loadData(true) }} disabled={loading || syncing}>
+                <RefreshCw size={13} className={(loading || syncing) ? 'animate-spin' : ''} />
               </button>
             </div>
           )}
