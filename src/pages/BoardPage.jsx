@@ -3599,7 +3599,7 @@ export default function BoardPage() {
         setCards(data.activeCards || [])
         setDoneCards(data.doneCards || [])
         setMovements([])
-        setManualCompletionDates(new Map(data.completionDates || []))
+        setManualCompletionDates(new Map(Object.entries(data.completionDates || {})))
         setManualCycleDays(data.cycleDays || {})
         setLastRefreshed(data.updatedAt?.toDate() || null)
         setCycleTimeLoading(false)
