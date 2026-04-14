@@ -3343,6 +3343,7 @@ export default function BoardPage() {
   const [manualCompletionDates, setManualCompletionDates] = useState(new Map()) // cardId → ISO completion date
   const [manualCycleDays,       setManualCycleDays]       = useState({})        // cardId → days (number)
   const [syncing,               setSyncing]               = useState(false)     // manual refresh in-flight
+  const autoSyncFiredRef = useRef(false)                                        // prevent repeated auto-sync per board visit
 
   useEffect(() => {
     if (!boardId) return
@@ -3601,10 +3602,18 @@ export default function BoardPage() {
         setMovements([])
         setManualCompletionDates(new Map(Object.entries(data.completionDates || {})))
         setManualCycleDays(data.cycleDays || {})
-        setLastRefreshed(data.updatedAt?.toDate() || null)
+        const updatedAt = data.updatedAt?.toDate() || null
+        setLastRefreshed(updatedAt)
         setCycleTimeLoading(false)
         setCycleTimeFetched(true)
         setLoading(false)
+
+        // Auto-sync if cached data is older than 15 minutes and we haven't already triggered it this visit
+        const STALE_MS = 15 * 60 * 1000
+        if (updatedAt && !autoSyncFiredRef.current && (Date.now() - updatedAt.getTime()) > STALE_MS) {
+          autoSyncFiredRef.current = true
+          triggerManualSync()
+        }
       },
       (err) => {
         console.error('Manual board snapshot error:', err)
@@ -3631,6 +3640,7 @@ export default function BoardPage() {
     setBoardName(config?.boards?.[boardId]?.name || '')
     setLoading(true)
     setActiveTab('request')
+    autoSyncFiredRef.current = false
   }, [boardId])
 
   useEffect(() => {

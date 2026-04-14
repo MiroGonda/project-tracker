@@ -260,7 +260,7 @@ async function syncBoard(boardId, trelloShortId, key, token) {
   // Load existing cache — used to seed maps for incremental action merging
   const cacheRef  = db.doc(`cache/manual_${boardId}`)
   const cacheSnap = await cacheRef.get()
-  const existing  = cacheSnap.exists() ? cacheSnap.data() : null
+  const existing  = cacheSnap.exists ? cacheSnap.data() : null
   const since     = existing?.lastActionDate || null
 
   // Fetch cards (always full — we need current board state) +
