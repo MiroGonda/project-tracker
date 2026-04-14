@@ -291,6 +291,7 @@ export default function Admin() {
 
   function saveBackendConfig() {
     const services = {
+      ...(config?.services || {}),  // preserve fields not shown here (e.g. trelloApiKey, trelloToken)
       phobosHost:   phobosHost.trim(),
       phobosApiKey: phobosApiKey.trim(),
       raintoolHost: raintoolHost.trim(),

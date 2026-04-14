@@ -231,9 +231,18 @@ export default function Settings() {
   const [passConfig,       setPassConfig]       = useState(() => getPassTrackingConfig())
   const [passSetupLoading, setPassSetupLoading] = useState(new Set())
 
-  // Trello credentials (needed for Pass Tracking setup — read from storage, editable here)
-  const trelloApiKey = localStorage.getItem('trello_api_key') || ''
-  const trelloToken  = localStorage.getItem('trello_token')   || ''
+  // Trello credentials — read from localStorage, seeded from config.services as fallback
+  const trelloApiKey = localStorage.getItem('trello_api_key') || config?.services?.trelloApiKey || ''
+  const trelloToken  = localStorage.getItem('trello_token')   || config?.services?.trelloToken  || ''
+
+  // Seed localStorage from Firestore config so trello.js getCreds() finds them
+  useEffect(() => {
+    if (!config?.services) return
+    if (config.services.trelloApiKey && !localStorage.getItem('trello_api_key'))
+      localStorage.setItem('trello_api_key', config.services.trelloApiKey)
+    if (config.services.trelloToken && !localStorage.getItem('trello_token'))
+      localStorage.setItem('trello_token', config.services.trelloToken)
+  }, [config])
 
   useEffect(() => {
     setGoogleConnected(isGoogleConnected())
