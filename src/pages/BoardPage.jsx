@@ -4025,6 +4025,16 @@ export default function BoardPage() {
 
   return (
     <div className="h-full overflow-y-auto">
+      {/* Syncing overlay — shown while Cloud Function is running for manual boards */}
+      {syncing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-surface border border-border rounded-xl px-6 py-5 flex flex-col items-center gap-3 shadow-2xl">
+            <Spinner size={22} />
+            <p className="text-sm font-medium text-text-primary">Syncing with Trello…</p>
+            <p className="text-xs text-text-muted">Fetching latest cards and movements. This may take a moment.</p>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div className="sticky top-0 z-10 bg-bg/90 backdrop-blur border-b border-border px-6 pt-4 pb-0">
         {/* Title row */}
