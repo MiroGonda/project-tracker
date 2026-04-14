@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { createBrowserRouter, RouterProvider, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { ThemeProvider } from './context/ThemeContext'
 import { AccessProvider, useAccess } from './context/AccessContext'
 import Sidebar from './components/Sidebar'
@@ -40,13 +40,22 @@ function AppShell() {
   )
 }
 
+// createBrowserRouter (data router) is required for useBlocker to work.
+// ThemeProvider and AccessProvider wrap RouterProvider so their contexts
+// remain available inside AppShell.
+const router = createBrowserRouter(
+  [{ path: '*', element: <AppShell /> }],
+  {
+    basename: '/project-tracker',
+    future: { v7_startTransition: true, v7_relativeSplatPath: true },
+  }
+)
+
 export default function App() {
   return (
     <ThemeProvider>
       <AccessProvider>
-        <BrowserRouter basename="/project-tracker" future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-          <AppShell />
-        </BrowserRouter>
+        <RouterProvider router={router} />
       </AccessProvider>
     </ThemeProvider>
   )

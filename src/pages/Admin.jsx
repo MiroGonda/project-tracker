@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useBlocker, useBeforeUnload } from 'react-router-dom'
 import {
-  ShieldCheck, Plus, Trash2, LayoutDashboard,
+  ShieldCheck, Plus, Trash2, Zap, PenLine, Hash,
   Download, Upload, RefreshCw, AlertTriangle, Check, X, AlertCircle,
-  Key, Save, Sun, Moon, CheckCircle2, Circle, UserCheck, UserX,
+  Key, Sun, Moon, CheckCircle2, Circle, UserCheck, UserX,
+  ChevronDown, ChevronRight,
 } from 'lucide-react'
 import { useAccess } from '../context/AccessContext'
 import { useTheme } from '../context/ThemeContext'
@@ -90,19 +92,44 @@ export default function Admin() {
   const [googleLoading,   setGoogleLoading]   = useState(false)
 
   // Access config
-  const [apiBoards,     setApiBoards]     = useState([])
   const [boardsLoading, setBoardsLoading] = useState(false)
   const [boardsError,   setBoardsError]   = useState(null)
+  const [boardSearch,   setBoardSearch]   = useState('')
   const [showRaw,       setShowRaw]       = useState(false)
   const [importText,    setImportText]    = useState('')
   const [showImport,    setShowImport]    = useState(false)
   const [draft,         setDraft]         = useState(null)
+  const [showNewBoard,    setShowNewBoard]    = useState(false)
+  const [newBoardName,    setNewBoardName]    = useState('')
+  const [newBoardShortId, setNewBoardShortId] = useState('')
+  const [expandedBoards,  setExpandedBoards]  = useState(new Set())
+
+  function toggleExpanded(id) {
+    setExpandedBoards(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  // Unsaved-changes guard — must be after draft state
+  const isDirty = !!draft && !!config && JSON.stringify(draft) !== JSON.stringify(config)
+
+  const blocker = useBlocker(
+    useCallback(({ currentLocation, nextLocation }) =>
+      isDirty && currentLocation.pathname !== nextLocation.pathname,
+    [isDirty])
+  )
+
+  useBeforeUnload(
+    useCallback(e => { if (isDirty) { e.preventDefault(); e.returnValue = '' } }, [isDirty])
+  )
 
   useEffect(() => {
     if (config) setDraft(JSON.parse(JSON.stringify(config)))
   }, [config])
 
-  const fetchBoards = useCallback(() => {
+  const loadAresBoards = useCallback(() => {
     const host = localStorage.getItem('phobos_host')   || localStorage.getItem('ares_host')
     const key  = localStorage.getItem('phobos_api_key') || localStorage.getItem('ares_api_key')
     if (!host || !key) {
@@ -112,7 +139,24 @@ export default function Admin() {
     setBoardsLoading(true)
     setBoardsError(null)
     listBoards()
-      .then(boards => { setApiBoards(boards); setBoardsError(null) })
+      .then(boards => {
+        const nextBoards = { ...draft.boards }
+        let added = 0
+        for (const b of boards) {
+          if (!b.id || nextBoards[b.id]) continue   // already present — leave it alone
+          nextBoards[b.id] = { name: b.name, source: 'ares', frostUsers: [], externalUsers: [] }
+          added++
+        }
+        const next = { ...draft, boards: nextBoards }
+        setDraft(next)
+        updateConfig(next)   // persist immediately — board list is global, not per-session
+        toast.success(
+          added > 0
+            ? `Added ${added} Ares board${added !== 1 ? 's' : ''} and saved.`
+            : 'All Ares boards are already in your list.'
+        )
+        setBoardsError(null)
+      })
       .catch(err => {
         const msg = err?.response
           ? `API error ${err.response.status}: ${JSON.stringify(err.response.data)}`
@@ -120,9 +164,7 @@ export default function Admin() {
         setBoardsError(msg)
       })
       .finally(() => setBoardsLoading(false))
-  }, [])
-
-  useEffect(() => { if (!loading) fetchBoards() }, [fetchBoards, loading])
+  }, [draft, updateConfig, toast])
 
   if (!canAdmin) {
     return (
@@ -207,6 +249,48 @@ export default function Admin() {
     setDraft(d => { const next = { ...d.boards }; delete next[id]; return { ...d, boards: next } })
   }
 
+  function toggleBoardSource(id, name) {
+    const current = draft.boards[id]?.source || 'ares'
+    const next = current === 'ares' ? 'manual' : 'ares'
+    setDraft(d => ({
+      ...d,
+      boards: {
+        ...d.boards,
+        [id]: { frostUsers: [], externalUsers: [], ...(d.boards[id] || {}), name, source: next },
+      },
+    }))
+  }
+
+  function createManualBoard() {
+    const name    = newBoardName.trim()
+    const shortId = newBoardShortId.trim()
+    if (!name) return
+    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+    if (!id) { toast.error('Invalid name.'); return }
+    if (draft.boards[id]) { toast.error(`A board with ID "${id}" already exists.`); return }
+    if (shortId) {
+      const clash = Object.values(draft.boards).find(b => b.trelloShortId === shortId)
+      if (clash) { toast.error(`"${clash.name || shortId}" already uses short board ID "${shortId}".`); return }
+    }
+    setDraft(d => ({
+      ...d,
+      boards: {
+        ...d.boards,
+        [id]: { name, source: 'manual', frostUsers: [], externalUsers: [], ...(shortId ? { trelloShortId: shortId } : {}) },
+      },
+    }))
+    setNewBoardName('')
+    setNewBoardShortId('')
+    setShowNewBoard(false)
+  }
+
+  function updateManualBoardField(id, field, value) {
+    setDraft(d => ({
+      ...d,
+      boards: { ...d.boards, [id]: { ...d.boards[id], [field]: value } },
+    }))
+  }
+
   // ── Backend API config actions ─────────────────────────────────────────────
 
   function saveBackendConfig() {
@@ -244,17 +328,14 @@ export default function Admin() {
 
   // ── Board list ─────────────────────────────────────────────────────────────
 
-  const seen   = new Set()
-  const apiIds = new Set()
-  for (const b of apiBoards) { if (b.id) apiIds.add(b.id) }
-  const allBoards = [
-    ...apiBoards
-      .filter(b => { if (!b.id || seen.has(b.id)) return false; seen.add(b.id); return true })
-      .map(b => ({ id: b.id, name: b.name })),
-    ...Object.entries(draft.boards)
-      .filter(([id]) => !apiIds.has(id) && !seen.has(id))
-      .map(([id, v]) => ({ id, name: v.name || id })),
-  ]
+  const allBoards = Object.entries(draft.boards)
+    .map(([id, v]) => ({ id, name: v.name || id }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+
+  const q = boardSearch.trim().toLowerCase()
+  const filteredBoards = q
+    ? allBoards.filter(b => b.name.toLowerCase().includes(q) || b.id.toLowerCase().includes(q))
+    : allBoards
 
   return (
     <div className="h-full overflow-y-auto">
@@ -270,12 +351,17 @@ export default function Admin() {
               Logged in as <span className="text-text-primary">{email}</span>
             </p>
           </div>
-          <div className="flex gap-2">
-            <button className="btn-secondary py-1" onClick={() => setShowImport(v => !v)}>
-              <Upload size={13} /> Import
-            </button>
-            <button className="btn-secondary py-1" onClick={exportJson}>
-              <Download size={13} /> Export JSON
+          <div className="flex items-center gap-2">
+            {isDirty && (
+              <span className="text-xs text-amber-400 flex items-center gap-1 shrink-0">
+                <AlertTriangle size={12} /> Unsaved
+              </span>
+            )}
+            <button
+              className={`btn-primary py-1 transition-all ${isDirty ? 'ring-2 ring-amber-400/40' : ''}`}
+              onClick={save}
+            >
+              <Check size={13} /> Save changes
             </button>
           </div>
         </div>
@@ -286,19 +372,6 @@ export default function Admin() {
             <span>
               <strong>Bootstrap mode:</strong> Add yourself as admin below and click Save to lock down access.
             </span>
-          </div>
-        )}
-
-        {showImport && (
-          <div className="mb-6 p-4 bg-surface border border-border rounded-xl">
-            <p className="text-xs text-text-muted mb-2">Paste a valid <code>access-config.json</code>:</p>
-            <textarea className="input font-mono text-xs h-32 resize-y" value={importText}
-              onChange={e => setImportText(e.target.value)}
-              placeholder='{"admins": [], "boards": {}}' />
-            <div className="flex gap-2 mt-2">
-              <button className="btn-primary" onClick={importJson}><Check size={13} /> Apply</button>
-              <button className="btn-secondary" onClick={() => { setShowImport(false); setImportText('') }}>Cancel</button>
-            </div>
           </div>
         )}
 
@@ -334,9 +407,26 @@ export default function Admin() {
                 Generate at: <code className="text-accent">trello.com/1/authorize?expiration=never&scope=read,write&response_type=token&key=YOUR_KEY</code>
               </p>
             </div>
-            <button className="btn-primary w-fit" onClick={saveBackendConfig}>
-              <Save size={13} /> Save
-            </button>
+            <div className="flex gap-2 pt-1">
+              <button className="btn-secondary py-1" onClick={() => setShowImport(v => !v)}>
+                <Upload size={13} /> Import JSON
+              </button>
+              <button className="btn-secondary py-1" onClick={exportJson}>
+                <Download size={13} /> Export JSON
+              </button>
+            </div>
+            {showImport && (
+              <div className="p-3 bg-white/[0.02] border border-border rounded-lg flex flex-col gap-2">
+                <p className="text-xs text-text-muted">Paste a valid <code>access-config.json</code>:</p>
+                <textarea className="input font-mono text-xs h-32 resize-y" value={importText}
+                  onChange={e => setImportText(e.target.value)}
+                  placeholder='{"admins": [], "boards": {}}' />
+                <div className="flex gap-2">
+                  <button className="btn-primary py-1" onClick={importJson}><Check size={13} /> Apply</button>
+                  <button className="btn-secondary py-1" onClick={() => { setShowImport(false); setImportText('') }}>Cancel</button>
+                </div>
+              </div>
+            )}
           </div>
         </Section>
 
@@ -402,11 +492,26 @@ export default function Admin() {
         <Section title="Project Access"
           description="Assign Frost Users (full board access) and External Users (board access only) per board.">
 
-          {boardsLoading && (
-            <div className="flex items-center gap-2 text-text-muted text-xs mb-3">
-              <Spinner size={12} /> Loading boards from Phobos API…
-            </div>
-          )}
+          {/* Toolbar: search + load */}
+          <div className="flex gap-2 mb-4">
+            <input
+              className="input text-xs py-1 flex-1"
+              placeholder="Search boards by name or ID…"
+              value={boardSearch}
+              onChange={e => setBoardSearch(e.target.value)}
+            />
+            <button
+              className="btn-secondary py-1 text-xs shrink-0"
+              onClick={loadAresBoards}
+              disabled={boardsLoading}
+              title="Fetch Ares boards and add any that aren't already in your list"
+            >
+              {boardsLoading
+                ? <><Spinner size={11} /> Loading…</>
+                : <><RefreshCw size={11} /> Load Ares boards</>
+              }
+            </button>
+          </div>
 
           {boardsError && (
             <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
@@ -414,79 +519,171 @@ export default function Admin() {
                 <AlertCircle size={13} className="shrink-0 mt-0.5" />
                 <span className="break-all">{boardsError}</span>
               </div>
-              <button className="btn-secondary py-1 text-xs" onClick={fetchBoards}>
+              <button className="btn-secondary py-1 text-xs" onClick={loadAresBoards}>
                 <RefreshCw size={11} /> Retry
               </button>
             </div>
           )}
 
-          {!boardsLoading && !boardsError && allBoards.length === 0 && (
-            <div className="mb-4 flex items-center gap-3">
-              <p className="text-xs text-text-muted italic flex-1">No boards returned from the API.</p>
-              <button className="btn-secondary py-1 text-xs" onClick={fetchBoards}>
-                <RefreshCw size={11} /> Retry
-              </button>
-            </div>
+          {!boardsLoading && allBoards.length === 0 && (
+            <p className="text-xs text-text-muted italic mb-4">
+              No boards yet — click "Load Ares boards" or create one manually below.
+            </p>
           )}
 
-          {!boardsLoading && !boardsError && allBoards.length > 0 && (
-            <button className="btn-secondary py-1 text-xs mb-4" onClick={fetchBoards}>
-              <RefreshCw size={11} /> Refresh boards
-            </button>
+          {!boardsLoading && allBoards.length > 0 && filteredBoards.length === 0 && (
+            <p className="text-xs text-text-muted italic mb-4">No boards match "{boardSearch}".</p>
           )}
 
-          <div className="flex flex-col gap-4">
-            {allBoards.map(({ id, name }) => {
-              const boardCfg    = draft.boards[id] || { frostUsers: [], externalUsers: [] }
-              const frostUsers  = boardCfg.frostUsers    ?? []
-              const extUsers    = boardCfg.externalUsers ?? []
+          <div className="flex flex-col gap-2">
+            {filteredBoards.map(({ id, name }) => {
+              const boardCfg   = draft.boards[id] || { frostUsers: [], externalUsers: [] }
+              const frostUsers = boardCfg.frostUsers    ?? []
+              const extUsers   = boardCfg.externalUsers ?? []
+              const source     = boardCfg.source || 'ares'
+              const isAres     = source === 'ares'
+              const isExpanded = expandedBoards.has(id)
               return (
-                <div key={id} className="p-4 bg-surface border border-border rounded-xl">
-                  <div className="flex items-center gap-2 mb-3">
-                    <LayoutDashboard size={13} className="text-accent shrink-0" />
-                    <span className="text-sm font-medium text-text-primary">{name}</span>
-                    <span className="text-xs text-text-muted font-mono">{id}</span>
-                    <div className="flex-1" />
+                <div key={id} className="bg-surface border border-border rounded-xl overflow-hidden">
+
+                  {/* Collapsed row */}
+                  <div className="flex items-center gap-2 px-3 py-2.5">
+                    {isAres
+                      ? <Zap size={13} className="text-blue-400 shrink-0" />
+                      : <PenLine size={13} className="text-emerald-400 shrink-0" />
+                    }
+                    <span className="text-sm font-medium text-text-primary truncate flex-1">{boardCfg.name || name}</span>
+                    <span className="text-xs text-text-muted font-mono shrink-0">{id}</span>
+
+                    {/* User counts */}
+                    <span className="flex items-center gap-1 text-xs text-indigo-400 shrink-0" title="Frost users">
+                      <UserCheck size={11} /> {frostUsers.length}
+                    </span>
+                    <span className="flex items-center gap-1 text-xs text-amber-400 shrink-0" title="External users">
+                      <UserX size={11} /> {extUsers.length}
+                    </span>
+
+                    {/* Segmented source toggle */}
+                    <div className="inline-flex rounded-lg overflow-hidden border border-border text-[10px] font-medium shrink-0">
+                      <button
+                        onClick={() => !isAres && toggleBoardSource(id, name)}
+                        className={`px-2.5 py-1 transition-colors ${isAres ? 'bg-blue-500/20 text-blue-400' : 'text-text-muted hover:bg-white/5 hover:text-text-primary'}`}
+                      >Ares</button>
+                      <div className="w-px bg-border" />
+                      <button
+                        onClick={() => isAres && toggleBoardSource(id, name)}
+                        className={`px-2.5 py-1 transition-colors ${!isAres ? 'bg-emerald-500/20 text-emerald-400' : 'text-text-muted hover:bg-white/5 hover:text-text-primary'}`}
+                      >Manual</button>
+                    </div>
+
                     {draft.boards[id] && (
-                      <button onClick={() => removeBoard(id)}
-                        className="text-text-muted hover:text-red-400 transition-colors">
+                      <button onClick={() => removeBoard(id)} className="text-text-muted hover:text-red-400 transition-colors shrink-0">
                         <Trash2 size={13} />
                       </button>
                     )}
+                    <button onClick={() => toggleExpanded(id)} className="text-text-muted hover:text-text-primary transition-colors shrink-0">
+                      {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                    </button>
                   </div>
 
-                  {/* Frost Users */}
-                  <div className="mb-3">
-                    <p className="text-[10px] font-medium text-indigo-400 flex items-center gap-1 mb-1.5">
-                      <UserCheck size={10} /> Frost Users
-                      <span className="text-text-muted font-normal ml-1">— full board access, can configure integrations</span>
-                    </p>
-                    <div className="flex flex-wrap gap-1.5 mb-1">
-                      {frostUsers.length === 0
-                        ? <p className="text-xs text-text-muted italic">None assigned.</p>
-                        : frostUsers.map(u => <Tag key={u} label={u} role="frost" onRemove={() => removeFrostUser(id, u)} />)
-                      }
-                    </div>
-                    <AddEmailInput onAdd={addr => addFrostUser(id, name, addr)} placeholder="frost@example.com" />
-                  </div>
+                  {/* Expanded details */}
+                  {isExpanded && (
+                    <div className="px-3 pb-4 pt-3 border-t border-border flex flex-col gap-4">
 
-                  {/* External Users */}
-                  <div>
-                    <p className="text-[10px] font-medium text-amber-400 flex items-center gap-1 mb-1.5">
-                      <UserX size={10} /> External Users
-                      <span className="text-text-muted font-normal ml-1">— board access, no Utilization tab</span>
-                    </p>
-                    <div className="flex flex-wrap gap-1.5 mb-1">
-                      {extUsers.length === 0
-                        ? <p className="text-xs text-text-muted italic">None assigned.</p>
-                        : extUsers.map(u => <Tag key={u} label={u} role="external" onRemove={() => removeExternalUser(id, u)} />)
-                      }
+                      {/* Manual-only fields */}
+                      {!isAres && (
+                        <div className="p-3 bg-white/[0.02] border border-emerald-500/20 rounded-lg flex flex-col gap-3">
+                          <div>
+                            <label className="text-[10px] font-medium text-emerald-400 block mb-1">Display Name</label>
+                            <input className="input text-xs py-1 w-full" value={boardCfg.name || ''}
+                              onChange={e => updateManualBoardField(id, 'name', e.target.value)} placeholder="Project display name" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-medium text-emerald-400 flex items-center gap-1 mb-1">
+                              <Hash size={9} /> Trello Short Board ID
+                            </label>
+                            <input className="input text-xs py-1 w-full font-mono" value={boardCfg.trelloShortId || ''}
+                              onChange={e => updateManualBoardField(id, 'trelloShortId', e.target.value)} placeholder="e.g. aBc1dEfg" />
+                            <p className="text-[10px] text-text-muted mt-1">
+                              From the board URL: trello.com/b/<span className="text-text-primary font-mono">aBc1dEfg</span>/board-name
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Data tag — all boards */}
+                      <div>
+                        <label className="text-[10px] font-medium text-text-muted flex items-center gap-1 mb-1">
+                          <Hash size={9} /> Data tag
+                        </label>
+                        <input className="input text-xs py-1 w-full" value={boardCfg.dataTag || ''}
+                          onChange={e => updateManualBoardField(id, 'dataTag', e.target.value)} placeholder="Optional tag for this board" />
+                      </div>
+
+                      {/* Frost Users */}
+                      <div>
+                        <p className="text-[10px] font-medium text-indigo-400 flex items-center gap-1 mb-1.5">
+                          <UserCheck size={10} /> Frost Users
+                          <span className="text-text-muted font-normal ml-1">— full board access, can configure integrations</span>
+                        </p>
+                        <div className="flex flex-wrap gap-1.5 mb-1">
+                          {frostUsers.length === 0
+                            ? <p className="text-xs text-text-muted italic">None assigned.</p>
+                            : frostUsers.map(u => <Tag key={u} label={u} role="frost" onRemove={() => removeFrostUser(id, u)} />)
+                          }
+                        </div>
+                        <AddEmailInput onAdd={addr => addFrostUser(id, name, addr)} placeholder="frost@example.com" />
+                      </div>
+
+                      {/* External Users */}
+                      <div>
+                        <p className="text-[10px] font-medium text-amber-400 flex items-center gap-1 mb-1.5">
+                          <UserX size={10} /> External Users
+                          <span className="text-text-muted font-normal ml-1">— board access, no Utilization tab</span>
+                        </p>
+                        <div className="flex flex-wrap gap-1.5 mb-1">
+                          {extUsers.length === 0
+                            ? <p className="text-xs text-text-muted italic">None assigned.</p>
+                            : extUsers.map(u => <Tag key={u} label={u} role="external" onRemove={() => removeExternalUser(id, u)} />)
+                          }
+                        </div>
+                        <AddEmailInput onAdd={addr => addExternalUser(id, name, addr)} placeholder="external@example.com" />
+                      </div>
                     </div>
-                    <AddEmailInput onAdd={addr => addExternalUser(id, name, addr)} placeholder="external@example.com" />
-                  </div>
+                  )}
                 </div>
               )
             })}
+
+            {/* New Board form */}
+            {showNewBoard ? (
+              <div className="p-4 bg-surface border border-dashed border-border rounded-xl flex flex-col gap-2">
+                <p className="text-xs text-text-muted">New manual board</p>
+                <input
+                  className="input text-xs py-1"
+                  placeholder="Board name, e.g. Client X"
+                  value={newBoardName}
+                  onChange={e => setNewBoardName(e.target.value)}
+                  onKeyDown={e => e.key === 'Escape' && (setShowNewBoard(false), setNewBoardName(''), setNewBoardShortId(''))}
+                  autoFocus
+                />
+                <input
+                  className="input text-xs py-1 font-mono"
+                  placeholder="Trello short board ID (optional, e.g. aBc1dEfg)"
+                  value={newBoardShortId}
+                  onChange={e => setNewBoardShortId(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') createManualBoard(); if (e.key === 'Escape') { setShowNewBoard(false); setNewBoardName(''); setNewBoardShortId('') } }}
+                />
+                <div className="flex gap-2">
+                  <button className="btn-primary py-1" onClick={createManualBoard}><Check size={12} /> Create</button>
+                  <button className="btn-secondary py-1" onClick={() => { setShowNewBoard(false); setNewBoardName(''); setNewBoardShortId('') }}><X size={12} /></button>
+                </div>
+              </div>
+            ) : (
+              <button className="btn-secondary py-1 text-xs w-fit" onClick={() => setShowNewBoard(true)}>
+                <Plus size={12} /> New Board
+              </button>
+            )}
           </div>
         </Section>
 
@@ -504,14 +701,30 @@ export default function Admin() {
           </pre>
         )}
 
-        <div className="sticky bottom-4 flex justify-end">
-          <button className="btn-primary shadow-lg" onClick={save}>
-            <Check size={14} /> Save changes
-          </button>
-        </div>
 
       </div>
       <Toast toasts={toasts} dismiss={dismiss} />
+
+      {/* Unsaved-changes navigation blocker */}
+      {blocker.state === 'blocked' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-[2px]">
+          <div className="bg-surface border border-border rounded-xl p-6 w-[400px] shadow-2xl">
+            <h3 className="text-sm font-semibold text-text-primary mb-2 flex items-center gap-2">
+              <AlertTriangle size={14} className="text-amber-400 shrink-0" /> Unsaved changes
+            </h3>
+            <p className="text-xs text-text-muted mb-5">
+              You have unsaved changes. If you leave now, they will be lost.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button className="btn-secondary" onClick={() => blocker.reset()}>Stay & keep editing</button>
+              <button
+                className="btn-primary !bg-red-500/15 !text-red-400 !border-red-500/30 hover:!bg-red-500/25"
+                onClick={() => blocker.proceed()}
+              >Leave without saving</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

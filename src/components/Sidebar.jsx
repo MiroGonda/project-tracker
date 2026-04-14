@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom'
 import { useState, useEffect, useMemo } from 'react'
 import {
   Settings, ShieldCheck, ChevronLeft, ChevronRight,
-  LayoutDashboard,
+  Zap, PenLine,
 } from 'lucide-react'
 import { useAccess } from '../context/AccessContext'
 import { listBoards } from '../api/phobos'
@@ -15,7 +15,7 @@ export default function Sidebar() {
   const [apiBoards,     setApiBoards]     = useState([])
   const [boardsLoading, setBoardsLoading] = useState(false)
 
-  const { admin, canAdmin, accessibleIds, loading: configLoading, email } = useAccess()
+  const { admin, canAdmin, accessibleIds, loading: configLoading, email, config } = useAccess()
 
   useEffect(() => {
     const host   = localStorage.getItem('phobos_host')   || localStorage.getItem('ares_host')
@@ -32,14 +32,29 @@ export default function Sidebar() {
 
   const visibleBoards = useMemo(() => {
     const seen = new Set()
-    return apiBoards.filter(b => {
+    const result = []
+
+    // Ares boards from API
+    for (const b of apiBoards) {
       const id = b.id || b.boardId
-      if (!id || seen.has(id)) return false
+      if (!id || seen.has(id)) continue
       seen.add(id)
-      if (hiddenIds.has(id)) return false
-      return admin || accessibleIds.has(id)
-    })
-  }, [apiBoards, admin, accessibleIds, hiddenIds])
+      if (hiddenIds.has(id)) continue
+      if (admin || accessibleIds.has(id)) result.push({ ...b, source: 'ares' })
+    }
+
+    // Manual boards from config (not returned by the Phobos API)
+    if (config?.boards) {
+      for (const [id, boardCfg] of Object.entries(config.boards)) {
+        if (boardCfg.source !== 'manual') continue
+        if (seen.has(id) || hiddenIds.has(id)) continue
+        seen.add(id)
+        if (admin || accessibleIds.has(id)) result.push({ id, name: boardCfg.name || id, source: 'manual' })
+      }
+    }
+
+    return result
+  }, [apiBoards, config, admin, accessibleIds, hiddenIds])
 
   const STATIC_NAV = [
     ...(email ? [{ to: '/settings', label: 'Settings', Icon: Settings }] : []),
@@ -92,7 +107,10 @@ export default function Sidebar() {
                        }`
                     }
                   >
-                    <LayoutDashboard size={13} className="shrink-0" />
+                    {b.source === 'ares'
+                      ? <Zap size={13} className="shrink-0 text-blue-400" />
+                      : <PenLine size={13} className="shrink-0 text-emerald-400" />
+                    }
                     {!collapsed && <span className="truncate">{b.name}</span>}
                   </NavLink>
                 )

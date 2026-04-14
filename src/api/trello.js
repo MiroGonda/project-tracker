@@ -108,3 +108,69 @@ export async function setCardCustomField(cardId, fieldId, isoDate) {
   })
   return r
 }
+
+/**
+ * Fetch all open cards from a Trello board (by short ID or full ID) and
+ * normalize them to match the Phobos card shape expected by BoardPage.
+ * Returns a flat array of all cards — caller splits into active/done by LANE_MAP.
+ *
+ * Normalized shape: { id, name, currentList, labels, due, dateLastActivity, members }
+ * — compatible with extractList(), extractLabels(), extractMembers(), getLaneInfo()
+ *   and every other card helper in BoardPage without modification.
+ */
+export async function fetchTrelloBoardCards(shortBoardId) {
+  const [listsRes, cardsRes] = await Promise.all([
+    fetch(`${BASE}/boards/${shortBoardId}/lists?${qs({ filter: 'open', fields: 'id,name' })}`),
+    fetch(`${BASE}/boards/${shortBoardId}/cards?${qs({
+      filter:       'open',
+      fields:       'id,name,idList,labels,due,dateLastActivity',
+      members:      'true',
+      member_fields: 'fullName,username',
+    })}`),
+  ])
+  if (!listsRes.ok) throw new Error(`Trello lists ${listsRes.status}: ${await listsRes.text()}`)
+  if (!cardsRes.ok) throw new Error(`Trello cards ${cardsRes.status}: ${await cardsRes.text()}`)
+
+  const lists    = await listsRes.json()
+  const rawCards = await cardsRes.json()
+  const listMap  = Object.fromEntries(lists.map(l => [l.id, l.name]))
+
+  return rawCards.map(c => ({
+    id:               c.id,
+    name:             c.name,
+    currentList:      listMap[c.idList] || '',
+    labels:           (c.labels   || []).map(l => ({ id: l.id, name: l.name, color: l.color })),
+    due:              c.due              || null,
+    dateLastActivity: c.dateLastActivity || null,
+    members:          (c.members  || []).map(m => ({ fullName: m.fullName, username: m.username })),
+  }))
+}
+
+/**
+ * GET /1/boards/:boardId/actions?filter=updateCard:idList
+ * Returns card list-change actions for the board (paginated, newest first).
+ * Each action: { id, date, data: { card: { id }, listBefore: { name }, listAfter: { name } } }
+ *
+ * since: optional ISO string — only return actions newer than this date (incremental fetch).
+ *        Omit for a full history fetch.
+ */
+export async function fetchBoardActions(shortBoardId, since = null) {
+  const allActions = []
+  const limit = 1000
+  let before = null
+
+  while (true) {
+    const params = { filter: 'updateCard:idList', limit, fields: 'date,data' }
+    if (before) params.before = before
+    if (since)  params.since  = since
+    const r = await fetch(`${BASE}/boards/${shortBoardId}/actions?${qs(params)}`)
+    if (!r.ok) throw new Error(`Trello actions ${r.status}: ${await r.text()}`)
+    const batch = await r.json()
+    if (!batch.length) break
+    allActions.push(...batch)
+    if (batch.length < limit) break
+    before = batch[batch.length - 1].id
+  }
+
+  return allActions
+}
