@@ -20,11 +20,7 @@
 
 const { onRequest }  = require('firebase-functions/v2/https')
 const { onSchedule } = require('firebase-functions/v2/scheduler')
-const { defineSecret } = require('firebase-functions/params')
 const admin            = require('firebase-admin')
-
-const TRELLO_KEY   = defineSecret('TRELLO_KEY')
-const TRELLO_TOKEN = defineSecret('TRELLO_TOKEN')
 
 admin.initializeApp()
 const db = admin.firestore()
@@ -340,11 +336,8 @@ async function syncBoard(boardId, trelloShortId, key, token) {
 // URL: https://us-central1-phobos-9246e.cloudfunctions.net/syncBoardHttp?boardId=<id>
 
 exports.syncBoardHttp = onRequest(
-  { secrets: [TRELLO_KEY, TRELLO_TOKEN], region: 'us-central1', cors: true, invoker: 'public' },
+  { region: 'us-central1', cors: true, invoker: 'public' },
   async (req, res) => {
-    const key   = TRELLO_KEY.value()
-    const token = TRELLO_TOKEN.value()
-
     const { boardId } = req.query
     if (!boardId) {
       res.status(400).json({ ok: false, error: 'Missing boardId query parameter' })
@@ -355,10 +348,13 @@ exports.syncBoardHttp = onRequest(
       const configSnap = await db.doc('config/access').get()
       const config     = configSnap.data() || {}
       const board      = config.boards?.[boardId]
+      const key        = config.services?.trelloApiKey
+      const token      = config.services?.trelloToken
 
       if (!board)                    { res.status(404).json({ ok: false, error: `Board ${boardId} not found in config` }); return }
       if (board.source !== 'manual') { res.status(400).json({ ok: false, error: 'Board is not configured as manual' }); return }
       if (!board.trelloShortId)      { res.status(400).json({ ok: false, error: 'Board has no trelloShortId configured' }); return }
+      if (!key || !token)            { res.status(500).json({ ok: false, error: 'Trello credentials not found in config/access.services' }); return }
 
       const result = await syncBoard(boardId, board.trelloShortId, key, token)
       res.json({ ok: true, boardId, ...result })
@@ -372,15 +368,19 @@ exports.syncBoardHttp = onRequest(
 // ─── Scheduled trigger — background sync every 30 minutes ────────────────────
 
 exports.syncAllBoards = onSchedule(
-  { schedule: 'every 30 minutes', secrets: [TRELLO_KEY, TRELLO_TOKEN], region: 'us-central1' },
+  { schedule: 'every 60 minutes', region: 'us-central1' },
   async () => {
-    const key   = TRELLO_KEY.value()
-    const token = TRELLO_TOKEN.value()
-
     const configSnap   = await db.doc('config/access').get()
     const config       = configSnap.data() || {}
+    const key          = config.services?.trelloApiKey
+    const token        = config.services?.trelloToken
     const manualBoards = Object.entries(config.boards || {})
       .filter(([, b]) => b.source === 'manual' && b.trelloShortId)
+
+    if (!key || !token) {
+      console.error('syncAllBoards: Trello credentials not found in config/access.services')
+      return
+    }
 
     if (!manualBoards.length) {
       console.log('syncAllBoards: no manual boards found')
