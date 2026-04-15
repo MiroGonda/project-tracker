@@ -3396,19 +3396,7 @@ export default function BoardPage() {
     return map
   }, [isManualBoard, manualActivatedDates])
 
-  const cycleTimeP85 = useMemo(() => {
-    if (isManualBoard) {
-      const days = Object.values(manualCycleDays).filter(d => d != null && !isNaN(d)).sort((a, b) => a - b)
-      if (!days.length) return null
-      return days[Math.floor(days.length * 0.85)]
-    }
-    const hours = cycleTimeData
-      .map(r => r.cycleHours != null ? Number(r.cycleHours) : null)
-      .filter(h => h != null && !isNaN(h))
-      .sort((a, b) => a - b)
-    if (!hours.length) return null
-    return hours[Math.floor(hours.length * 0.85)] / 24
-  }, [isManualBoard, manualCycleDays, cycleTimeData])
+  // cycleTimeP85 is computed after cutoffFilteredDoneCards (see below) so it reflects active filters
 
   // Filters (lifted — affect KPIs + throughput)
   const [typeFilter,      setTypeFilter]      = useState('all')
@@ -3768,6 +3756,19 @@ export default function BoardPage() {
     }),
     [filteredDoneForThroughput, throughputCutoff, completionDateMap],
   )
+
+  // p85 uses the same filtered+cutoff done cards as the throughput chart
+  const cycleTimeP85 = useMemo(() => {
+    const days = cutoffFilteredDoneCards
+      .map(c => {
+        const key = String(c.id || c.cardId || '')
+        return isManualBoard ? (manualCycleDays[key] ?? null) : (cycleTimeMap[key] ?? null)
+      })
+      .filter(d => d != null && !isNaN(d))
+      .sort((a, b) => a - b)
+    if (!days.length) return null
+    return days[Math.floor(days.length * 0.85)]
+  }, [cutoffFilteredDoneCards, isManualBoard, manualCycleDays, cycleTimeMap])
 
   // KPI counts are scoped to the same cards visible in the throughput chart
   const diffCounts = useMemo(() => {
