@@ -70,6 +70,8 @@ export default function Admin() {
   const [phobosHost,   setPhobosHost]   = useState(() => localStorage.getItem('phobos_host')    || localStorage.getItem('ares_host')    || '')
   const [phobosApiKey, setPhobosApiKey] = useState(() => localStorage.getItem('phobos_api_key') || localStorage.getItem('ares_api_key') || '')
   const [raintoolHost, setRaintoolHost] = useState(() => localStorage.getItem('raintool_host')  || 'https://hailstorm.frostdesigngroup.com')
+  const [trelloApiKey, setTrelloApiKey] = useState(() => localStorage.getItem('trello_api_key') || '')
+  const [trelloToken,  setTrelloToken]  = useState(() => localStorage.getItem('trello_token')   || '')
 
   // One-time sync from Firestore once config loads (handles first-time load before localStorage is seeded)
   const svcInitialized = useRef(false)
@@ -80,6 +82,8 @@ export default function Admin() {
     if (svc.phobosHost   || svc.aresHost)   setPhobosHost(svc.phobosHost   || svc.aresHost)
     if (svc.phobosApiKey || svc.aresApiKey) setPhobosApiKey(svc.phobosApiKey || svc.aresApiKey)
     if (svc.raintoolHost) setRaintoolHost(svc.raintoolHost)
+    if (svc.trelloApiKey) setTrelloApiKey(svc.trelloApiKey)
+    if (svc.trelloToken)  setTrelloToken(svc.trelloToken)
   }, [config])
 
   // Google auth state
@@ -291,16 +295,20 @@ export default function Admin() {
 
   function saveBackendConfig() {
     const services = {
-      ...(config?.services || {}),  // preserve fields not shown here (e.g. trelloApiKey, trelloToken)
+      ...(config?.services || {}),
       phobosHost:   phobosHost.trim(),
       phobosApiKey: phobosApiKey.trim(),
       raintoolHost: raintoolHost.trim(),
+      trelloApiKey: trelloApiKey.trim(),
+      trelloToken:  trelloToken.trim(),
     }
     updateConfig({ ...config, services })
     // Seed localStorage immediately so the current session works right away
     localStorage.setItem('phobos_host',    services.phobosHost)
     localStorage.setItem('phobos_api_key', services.phobosApiKey)
     localStorage.setItem('raintool_host',  services.raintoolHost)
+    localStorage.setItem('trello_api_key', services.trelloApiKey)
+    localStorage.setItem('trello_token',   services.trelloToken)
     toast.success('Backend configuration saved.')
   }
 
@@ -386,6 +394,21 @@ export default function Admin() {
               <label className="block text-xs text-text-muted mb-1">Raintool Host</label>
               <input className="input" placeholder="https://hailstorm.frostdesigngroup.com"
                 value={raintoolHost} onChange={e => setRaintoolHost(e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-xs text-text-muted mb-1 flex items-center gap-1"><Key size={11} /> Trello API Key</label>
+              <input className="input" type="password" placeholder="••••••••••••"
+                value={trelloApiKey} onChange={e => setTrelloApiKey(e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-xs text-text-muted mb-1 flex items-center gap-1"><Key size={11} /> Trello Token</label>
+              <input className="input" type="password" placeholder="••••••••••••"
+                value={trelloToken} onChange={e => setTrelloToken(e.target.value)} />
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button className="btn-primary py-1" onClick={saveBackendConfig}>
+                <Check size={13} /> Save backend config
+              </button>
             </div>
             <div className="flex gap-2 pt-1">
               <button className="btn-secondary py-1" onClick={() => setShowImport(v => !v)}>
