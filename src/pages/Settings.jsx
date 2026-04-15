@@ -10,6 +10,7 @@ import {
 } from '../api/google'
 import { listBoards, listRaintoolProjects } from '../api/phobos'
 import { fetchBoardCustomFields, createCustomField } from '../api/trello'
+import { saveUserPrefs } from '../api/userPrefs'
 import Toast from '../components/Toast'
 import useToast from '../hooks/useToast'
 import Spinner from '../components/Spinner'
@@ -265,7 +266,9 @@ export default function Settings() {
     setHiddenIds(prev => {
       const next = new Set(prev)
       next.has(id) ? next.delete(id) : next.add(id)
-      localStorage.setItem('hidden_board_ids', JSON.stringify([...next]))
+      const arr = [...next]
+      localStorage.setItem('hidden_board_ids', JSON.stringify(arr))
+      saveUserPrefs(email, { hiddenBoardIds: arr }).catch(() => {})
       return next
     })
   }
@@ -300,6 +303,7 @@ export default function Settings() {
       const next = { ...getPassTrackingConfig(), [boardId]: { enabled: true, fieldIds } }
       localStorage.setItem(PASS_STORAGE_KEY, JSON.stringify(next))
       setPassConfig(next)
+      saveUserPrefs(email, { passTracking: next }).catch(() => {})
       toast.success('Pass tracking enabled.')
     } catch (e) {
       toast.error(`Setup failed: ${e.message}`)
@@ -313,6 +317,7 @@ export default function Settings() {
     delete next[boardId]
     localStorage.setItem(PASS_STORAGE_KEY, JSON.stringify(next))
     setPassConfig(next)
+    saveUserPrefs(email, { passTracking: next }).catch(() => {})
     toast.info('Pass tracking disabled for board.')
   }
 

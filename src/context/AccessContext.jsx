@@ -5,6 +5,7 @@ import {
   fetchAccessConfig, isAdmin, canAdminister,
   getAccessibleBoardIds, saveAccessConfig, getUserBoardRole,
 } from '../api/access'
+import { fetchUserPrefs } from '../api/userPrefs'
 
 const AccessContext = createContext()
 
@@ -15,11 +16,20 @@ export function AccessProvider({ children }) {
   const [error,     setError]       = useState(null)
   const [email,     setEmail]       = useState(null)
 
-  // Track Firebase Auth state
+  // Track Firebase Auth state; seed user preferences from Firestore on login
   useEffect(() => {
-    return onAuthStateChanged(auth, user => {
+    return onAuthStateChanged(auth, async user => {
       setEmail(user?.email || null)
       setAuthReady(true)
+      if (user?.email) {
+        try {
+          const prefs = await fetchUserPrefs(user.email)
+          if (Array.isArray(prefs.hiddenBoardIds))
+            localStorage.setItem('hidden_board_ids', JSON.stringify(prefs.hiddenBoardIds))
+          if (prefs.passTracking && typeof prefs.passTracking === 'object')
+            localStorage.setItem('pass_tracking', JSON.stringify(prefs.passTracking))
+        } catch { /* non-fatal — localStorage already has any local state */ }
+      }
     })
   }, [])
 
