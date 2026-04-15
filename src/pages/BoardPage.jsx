@@ -2599,8 +2599,8 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
                         <select
                           value={reqStatus}
                           onChange={e => {
-                            const val = e.target.value
-                            setRequests(prev => prev.map(x => x.id === r.id ? { ...x, status: val } : x))
+                            e.stopPropagation()
+                            onSaveRequest({ ...r, status: e.target.value })
                           }}
                           className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border-0 outline-none cursor-pointer appearance-none
                             ${reqStatus === 'closed'  ? 'bg-emerald-500/15 text-emerald-400' :
