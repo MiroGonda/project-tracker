@@ -3341,7 +3341,8 @@ export default function BoardPage() {
 
   // ── Manual board computed data — populated from Firestore cache written by Cloud Function ──
   const [manualCompletionDates, setManualCompletionDates] = useState(new Map()) // cardId → ISO completion date
-  const [manualCycleDays,       setManualCycleDays]       = useState({})        // cardId → days (number)
+  const [manualCycleDays,       setManualCycleDays]       = useState({})        // cardId → days (done cards)
+  const [manualActivatedDates,  setManualActivatedDates]  = useState(new Map()) // cardId → ISO first-activation date
   const [syncing,               setSyncing]               = useState(false)     // manual refresh in-flight
   const autoSyncFiredRef = useRef(false)                                        // prevent repeated auto-sync per board visit
 
@@ -3382,6 +3383,18 @@ export default function BoardPage() {
     }
     return map
   }, [isManualBoard, manualCycleDays, cycleTimeData])
+
+  // Ongoing cycle time for active cards on manual boards: days since first activation
+  const ongoingCycleMap = useMemo(() => {
+    if (!isManualBoard) return null
+    const now = Date.now()
+    const map = {}
+    for (const [cardId, activatedDate] of manualActivatedDates) {
+      const days = (now - new Date(activatedDate).getTime()) / (1000 * 60 * 60 * 24)
+      map[cardId] = Math.round(days * 10) / 10
+    }
+    return map
+  }, [isManualBoard, manualActivatedDates])
 
   const cycleTimeP85 = useMemo(() => {
     if (isManualBoard) {
@@ -3602,6 +3615,7 @@ export default function BoardPage() {
         setMovements([])
         setManualCompletionDates(new Map(Object.entries(data.completionDates || {})))
         setManualCycleDays(data.cycleDays || {})
+        setManualActivatedDates(new Map(Object.entries(data.activatedDates || {})))
         const updatedAt = data.updatedAt?.toDate() || null
         setLastRefreshed(updatedAt)
         setCycleTimeLoading(false)
@@ -3634,6 +3648,7 @@ export default function BoardPage() {
     setCycleTimeFetched(false)
     setManualCompletionDates(new Map())
     setManualCycleDays({})
+    setManualActivatedDates(new Map())
     setSyncing(false)
     setError(null)
     setPassMap(new Map())
@@ -3719,20 +3734,39 @@ export default function BoardPage() {
   const filteredActiveCards = useMemo(() => applyActiveFilters(cards),     [cards, listFilter, labelFilter, typeFilter, mcFilter])
   const filteredDoneCards   = useMemo(() => applyActiveFilters(doneCards),  [doneCards, listFilter, labelFilter, typeFilter, mcFilter])
 
+  // When the Done drilldown is open and done-specific filters are active, also apply them
+  // to the data feeding the Throughput chart and KPIs so they stay in sync.
+  const filteredDoneForThroughput = useMemo(() => {
+    if (!doneDrilldown || (doneListFilter.size === 0 && doneLabelFilter.size === 0)) return filteredDoneCards
+    return filteredDoneCards.filter(c => {
+      if (doneListFilter.size > 0) {
+        const match = doneListFilter.has(extractList(c))
+        if (doneListFilterMode === 'include' && !match) return false
+        if (doneListFilterMode === 'exclude' &&  match) return false
+      }
+      if (doneLabelFilter.size > 0) {
+        const hasLabel = extractLabels(c).some(l => doneLabelFilter.has(l.name))
+        if (doneLabelFilterMode === 'include' && !hasLabel) return false
+        if (doneLabelFilterMode === 'exclude' &&  hasLabel) return false
+      }
+      return true
+    })
+  }, [doneDrilldown, filteredDoneCards, doneListFilter, doneLabelFilter, doneListFilterMode, doneLabelFilterMode])
+
   const completionDateMap = useMemo(
     () => isManualBoard ? manualCompletionDates : buildCompletionDateMap(movements),
     [isManualBoard, manualCompletionDates, movements],
   )
 
   const cutoffFilteredDoneCards = useMemo(() =>
-    filteredDoneCards.filter(c => {
+    filteredDoneForThroughput.filter(c => {
       const cardId = c.id || c.cardId
       const d = completionDateMap.size > 0
         ? completionDateMap.get(cardId)
         : (c.dateLastActivity || c.updatedAt || c.due)
       return d && new Date(d) >= throughputCutoff
     }),
-    [filteredDoneCards, throughputCutoff, completionDateMap],
+    [filteredDoneForThroughput, throughputCutoff, completionDateMap],
   )
 
   // KPI counts are scoped to the same cards visible in the throughput chart
@@ -4229,7 +4263,7 @@ export default function BoardPage() {
             {/* Section row: Throughput + KPIs + Pipeline Distribution */}
             <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr_1fr] gap-4">
               <ThroughputSection
-                doneCards={filteredDoneCards}
+                doneCards={filteredDoneForThroughput}
                 allDoneCards={doneCards}
                 boardId={boardId}
                 cutoff={throughputCutoff}
@@ -4498,7 +4532,8 @@ export default function BoardPage() {
                       passMap={passTracking?.enabled ? passMap : undefined}
                       passFieldIds={passTracking?.enabled ? passTracking.fieldIds : undefined}
                       onPassDateChange={handlePassDateChange}
-                      hideCycleTime
+                      hideCycleTime={!isManualBoard}
+                      cycleTimeMap={isManualBoard ? ongoingCycleMap : undefined}
                       requestsMap={requestsMap}
                     />
                   ) : (
