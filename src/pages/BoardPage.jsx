@@ -3472,11 +3472,12 @@ export default function BoardPage() {
   }, [])
 
   useEffect(() => {
+    if (accessLoading) return  // wait for config/auth to resolve before checking credentials
     if (isManualBoard) { setConfigMissing(false); return }
     const host   = localStorage.getItem('phobos_host')   || localStorage.getItem('ares_host')
     const apiKey = localStorage.getItem('phobos_api_key') || localStorage.getItem('ares_api_key')
     setConfigMissing(!host || !apiKey)
-  }, [isManualBoard])
+  }, [isManualBoard, accessLoading])
 
   useEffect(() => {
     if (config?.boards?.[boardId]?.name) setBoardName(config.boards[boardId].name)
@@ -4036,6 +4037,12 @@ export default function BoardPage() {
         <p className="text-xs text-text-muted/60">Set the Trello Short Board ID in Admin to load data.</p>
         <Link to="/admin" className="btn-primary">Go to Admin</Link>
       </div>
+    )
+  }
+
+  if (accessLoading) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-text-muted text-sm">Loading…</div>
     )
   }
 
