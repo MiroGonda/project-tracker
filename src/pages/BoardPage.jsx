@@ -969,7 +969,7 @@ function ThroughputDrilldownTable({ cards }) {
 
 // ── Throughput KPI Panel ────────────────────────────────────────────────────────
 
-function ThroughputKpiPanel({ p85Days, diffCounts }) {
+function ThroughputKpiPanel({ p85Days, wipP85, diffCounts }) {
   const { easy = 0, medium = 0, hard = 0, unknown = 0 } = diffCounts || {}
   const total = easy + medium + hard + unknown
 
@@ -993,15 +993,18 @@ function ThroughputKpiPanel({ p85Days, diffCounts }) {
           <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted/60">Cycle Time</span>
           <div className="flex flex-col gap-2.5">
             <div className="flex items-end justify-between">
-              <span className="text-xs text-text-muted">85th Percentile</span>
+              <span className="text-xs text-text-muted">Done (85p)</span>
               {p85Days != null
                 ? <span className="text-lg font-bold tabular-nums leading-none" style={{ color: '#a855f7' }}>{p85Days.toFixed(1)}<span className="text-sm font-medium ml-0.5">d</span></span>
                 : <span className="text-sm text-text-muted/40">—</span>
               }
             </div>
             <div className="flex items-end justify-between">
-              <span className="text-xs text-text-muted">WIP Avg</span>
-              <span className="text-sm text-text-muted/40">—</span>
+              <span className="text-xs text-text-muted">WIP (85p)</span>
+              {wipP85 != null
+                ? <span className="text-lg font-bold tabular-nums leading-none" style={{ color: '#f59e0b' }}>{wipP85.toFixed(1)}<span className="text-sm font-medium ml-0.5">d</span></span>
+                : <span className="text-sm text-text-muted/40">—</span>
+              }
             </div>
           </div>
         </div>
@@ -2347,13 +2350,26 @@ function RequestVolumeSection({ requests, boardId }) {
   )
 }
 
-function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSaveRequest, onDeleteRequest }) {
+function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSaveRequest, onDeleteRequest, passMap }) {
   const activeCards   = cards     || []
   const allCards      = useMemo(() => [...activeCards, ...(doneCards || [])], [activeCards, doneCards])
 
   const targets = useMemo(() => {
     try { return JSON.parse(localStorage.getItem(`targets_${boardId}`) || '[]') } catch { return [] }
   }, [boardId])
+
+  // Compute earliest pass date across all attached cards for a given pass key
+  function getRequestPassDate(req, passKey) {
+    if (!passMap || !req.attachedCardIds?.length) return null
+    let min = null
+    for (const cardId of req.attachedCardIds) {
+      const passes = passMap.get(cardId)
+      const d = passes?.[passKey]
+      if (!d) continue
+      if (!min || d < min) min = d
+    }
+    return min
+  }
 
   const [editing,       setEditing]       = useState(null)
   const [isNew,         setIsNew]         = useState(false)
@@ -2589,6 +2605,9 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
                   <th className="text-left py-2.5 px-3 w-36">Progress</th>
                   <SortTh colKey="deadline" sortKey={reqSort.key} sortDir={reqSort.dir} onSort={toggleSort} className="w-24">Deadline</SortTh>
                   <SortTh colKey="spoc"     sortKey={reqSort.key} sortDir={reqSort.dir} onSort={toggleSort} className="w-28">SPOC</SortTh>
+                  {passMap && <th className="text-left py-2.5 px-3 w-20">1st Pass</th>}
+                  {passMap && <th className="text-left py-2.5 px-3 w-20">2nd Pass</th>}
+                  {passMap && <th className="text-left py-2.5 px-3 w-20">3rd Pass</th>}
                   <th className="py-2.5 px-3 w-8" />
                 </tr>
               </thead>
@@ -2683,6 +2702,14 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
                           {r.spoc || <span className="text-text-muted/25">—</span>}
                         </span>
                       </td>
+                      {passMap && ['first', 'second', 'third'].map(pk => {
+                        const d = getRequestPassDate(r, pk)
+                        return (
+                          <td key={pk} className="py-3 px-3 text-xs text-text-muted whitespace-nowrap">
+                            {d ? fmtFiled(d.split('T')[0]) : <span className="text-text-muted/25">—</span>}
+                          </td>
+                        )
+                      })}
                       <td className="py-3 px-3" onClick={e => { e.stopPropagation(); handleDelete(r.id) }}>
                         <button className="opacity-0 group-hover:opacity-100 text-text-muted/50 hover:text-red-400 transition-all p-1 rounded hover:bg-red-500/10">
                           <X size={12} />
@@ -3796,6 +3823,47 @@ export default function BoardPage() {
     return days[Math.floor(days.length * 0.85)]
   }, [cutoffFilteredDoneCards, isManualBoard, manualCycleDays, cycleTimeMap])
 
+  // WIP p85: 85th percentile age of active pipeline cards (Ongoing/For Review/Revising/For Approval)
+  const wipP85 = useMemo(() => {
+    // Build activation date map: first time each card entered a non-Pending, non-Done list
+    const activationMap = new Map()
+    if (!isManualBoard) {
+      for (const m of movements) {
+        const toList = extractMovementToList(m)
+        const status = LANE_MAP[toList]?.status
+        if (!status || status === 'Pending' || status === 'Done') continue
+        const cardId  = extractMovementCardId(m)
+        const dateStr = extractMovementDate(m)
+        if (!cardId || !dateStr) continue
+        const existing = activationMap.get(cardId)
+        if (!existing || new Date(dateStr) < new Date(existing)) {
+          activationMap.set(cardId, dateStr)
+        }
+      }
+    }
+
+    const now = Date.now()
+    const ages = filteredActiveCards
+      .filter(c => {
+        const status = LANE_MAP[extractList(c)]?.status
+        return status && status !== 'Pending' && status !== 'Done'
+      })
+      .map(c => {
+        const key = String(c.id || c.cardId || '')
+        if (isManualBoard) return ongoingCycleMap?.[key] ?? null
+        const activated = activationMap.get(key)
+        if (activated) return (now - new Date(activated).getTime()) / (1000 * 60 * 60 * 24)
+        // Fallback: dateLastActivity
+        const d = c.dateLastActivity || c.updatedAt
+        if (d) return (now - new Date(d).getTime()) / (1000 * 60 * 60 * 24)
+        return null
+      })
+      .filter(d => d != null && !isNaN(d))
+      .sort((a, b) => a - b)
+    if (!ages.length) return null
+    return ages[Math.floor(ages.length * 0.85)]
+  }, [filteredActiveCards, isManualBoard, movements, ongoingCycleMap])
+
   // KPI counts are scoped to the same cards visible in the throughput chart
   const diffCounts = useMemo(() => {
     const counts = { easy: 0, medium: 0, hard: 0, unknown: 0 }
@@ -4220,6 +4288,7 @@ export default function BoardPage() {
           boardId={boardId} cards={cards} doneCards={doneCards}
           requests={requests} requestsLoading={requestsLoading}
           onSaveRequest={handleSaveRequest} onDeleteRequest={handleDeleteRequest}
+          passMap={passTracking?.enabled ? passMap : null}
         />
       )}
 
@@ -4306,7 +4375,7 @@ export default function BoardPage() {
                 onViewChange={setThroughputView}
                 onBarClick={bucket => { setThroughputDrilldown(bucket); setDoneDrilldown(false) }}
               />
-              <ThroughputKpiPanel p85Days={cycleTimeP85} diffCounts={diffCounts} />
+              <ThroughputKpiPanel p85Days={cycleTimeP85} wipP85={wipP85} diffCounts={diffCounts} />
               <PipelineDistribution cards={filteredActiveCards} loading={loading} />
             </div>
 
