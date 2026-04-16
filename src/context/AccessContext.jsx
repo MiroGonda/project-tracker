@@ -1,20 +1,32 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { onAuthStateChanged } from 'firebase/auth'
+import { onSnapshot } from 'firebase/firestore'
 import { auth } from '../firebase'
 import {
-  fetchAccessConfig, isAdmin, canAdminister,
+  ACCESS_DOC, isAdmin, canAdminister,
   getAccessibleBoardIds, saveAccessConfig, getUserBoardRole,
 } from '../api/access'
 import { fetchUserPrefs } from '../api/userPrefs'
 
 const AccessContext = createContext()
 
+function seedLocalStorage(c) {
+  const svc = c.services || {}
+  const phHost   = svc.phobosHost   || svc.aresHost   || ''
+  const phApiKey = svc.phobosApiKey || svc.aresApiKey || ''
+  if (phHost)           localStorage.setItem('phobos_host',    phHost)
+  if (phApiKey)         localStorage.setItem('phobos_api_key', phApiKey)
+  if (svc.raintoolHost) localStorage.setItem('raintool_host',  svc.raintoolHost)
+  if (svc.trelloApiKey) localStorage.setItem('trello_api_key', svc.trelloApiKey)
+  if (svc.trelloToken)  localStorage.setItem('trello_token',   svc.trelloToken)
+}
+
 export function AccessProvider({ children }) {
-  const [config,    setConfigState] = useState(null)
+  const [config,      setConfigState] = useState(null)
   const [configReady, setConfigReady] = useState(false)
   const [authReady,   setAuthReady]   = useState(false)
-  const [error,     setError]       = useState(null)
-  const [email,     setEmail]       = useState(null)
+  const [error,       setError]       = useState(null)
+  const [email,       setEmail]       = useState(null)
 
   // Track Firebase Auth state; seed user preferences from Firestore on login
   useEffect(() => {
@@ -28,36 +40,38 @@ export function AccessProvider({ children }) {
             localStorage.setItem('hidden_board_ids', JSON.stringify(prefs.hiddenBoardIds))
           if (prefs.passTracking && typeof prefs.passTracking === 'object')
             localStorage.setItem('pass_tracking', JSON.stringify(prefs.passTracking))
-        } catch { /* non-fatal — localStorage already has any local state */ }
+        } catch { /* non-fatal */ }
       }
     })
   }, [])
 
-  const reload = useCallback(async () => {
+  // Real-time listener on config/access — all users see access changes immediately
+  useEffect(() => {
     setConfigReady(false)
-    setError(null)
-    try {
-      const c = await fetchAccessConfig()
-      // Seed shared service credentials into localStorage so api modules can read them.
-      // Read both new (phobos) and old (ares) field names to handle existing Firestore docs.
-      const svc = c.services || {}
-      const phHost   = svc.phobosHost   || svc.aresHost   || ''
-      const phApiKey = svc.phobosApiKey || svc.aresApiKey || ''
-      if (phHost)           localStorage.setItem('phobos_host',    phHost)
-      if (phApiKey)         localStorage.setItem('phobos_api_key', phApiKey)
-      if (svc.raintoolHost) localStorage.setItem('raintool_host',  svc.raintoolHost)
-      if (svc.trelloApiKey) localStorage.setItem('trello_api_key', svc.trelloApiKey)
-      if (svc.trelloToken)  localStorage.setItem('trello_token',   svc.trelloToken)
-      setConfigState(c)
-    } catch (e) {
-      setError(e.message)
-      setConfigState({ admins: [], boards: {} })
-    } finally {
-      setConfigReady(true)
-    }
+    const unsub = onSnapshot(
+      ACCESS_DOC,
+      snap => {
+        const c = snap.exists() ? snap.data() : { admins: [], boards: {} }
+        seedLocalStorage(c)
+        setConfigState(c)
+        setError(null)
+        setConfigReady(true)
+      },
+      err => {
+        console.error('AccessContext snapshot error:', err)
+        setError(err.message)
+        setConfigState({ admins: [], boards: {} })
+        setConfigReady(true)
+      },
+    )
+    return unsub
   }, [])
 
-  useEffect(() => { reload() }, [])
+  /** Manual reload — kept for callers that explicitly want to re-fetch. */
+  const reload = useCallback(() => {
+    // The onSnapshot listener keeps config current automatically.
+    // This is a no-op but preserved so existing call sites don't break.
+  }, [])
 
   /** No-op: Firebase Auth state updates reactively via onAuthStateChanged. */
   const refreshEmail = useCallback(() => {}, [])

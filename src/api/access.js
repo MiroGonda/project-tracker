@@ -1,7 +1,7 @@
 import { db } from '../firebase'
 import { doc, getDoc, setDoc } from 'firebase/firestore'
 
-const ACCESS_DOC = doc(db, 'config', 'access')
+export const ACCESS_DOC = doc(db, 'config', 'access')
 
 export async function fetchAccessConfig() {
   const snap = await getDoc(ACCESS_DOC)
