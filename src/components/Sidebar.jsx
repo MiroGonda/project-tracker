@@ -15,7 +15,7 @@ export default function Sidebar() {
   const [apiBoards,     setApiBoards]     = useState([])
   const [boardsLoading, setBoardsLoading] = useState(false)
 
-  const { admin, canAdmin, accessibleIds, loading: configLoading, email, config } = useAccess()
+  const { admin, canAdmin, accessibleIds, loading: configLoading, email, config, hiddenIds } = useAccess()
 
   useEffect(() => {
     const host   = localStorage.getItem('phobos_host')   || localStorage.getItem('ares_host')
@@ -25,10 +25,7 @@ export default function Sidebar() {
     listBoards().then(setApiBoards).catch(() => {}).finally(() => setBoardsLoading(false))
   }, [])
 
-  const hiddenIds = useMemo(() => {
-    try { return new Set(JSON.parse(localStorage.getItem('hidden_board_ids') || '[]')) }
-    catch { return new Set() }
-  }, [])
+  // hiddenIds is now provided by AccessContext for cross-component reactivity
 
   const visibleBoards = useMemo(() => {
     const seen = new Set()

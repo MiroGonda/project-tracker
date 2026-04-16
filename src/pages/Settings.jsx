@@ -210,7 +210,7 @@ function ExternalUserManager({ boardId, config, updateConfig }) {
 
 export default function Settings() {
   const { isDark, toggleTheme }    = useTheme()
-  const { refreshEmail, admin, getBoardRole, accessibleIds, config, updateConfig, email, loading: configLoading } = useAccess()
+  const { refreshEmail, admin, getBoardRole, accessibleIds, config, updateConfig, email, loading: configLoading, hiddenIds, toggleBoardHidden } = useAccess()
   const { toasts, toast, dismiss } = useToast()
 
   // Google auth
@@ -223,10 +223,6 @@ export default function Settings() {
 
   // Board visibility
   const [allBoards, setAllBoards] = useState([])
-  const [hiddenIds, setHiddenIds] = useState(() => {
-    try { return new Set(JSON.parse(localStorage.getItem('hidden_board_ids') || '[]')) }
-    catch { return new Set() }
-  })
 
   // Pass Tracking
   const [passConfig,       setPassConfig]       = useState(() => getPassTrackingConfig())
@@ -262,16 +258,7 @@ export default function Settings() {
     || admin
     || [...accessibleIds].some(id => { const r = getBoardRole(id); return r === 'frost' || r === 'admin' })
 
-  function toggleBoardHidden(id) {
-    setHiddenIds(prev => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      const arr = [...next]
-      localStorage.setItem('hidden_board_ids', JSON.stringify(arr))
-      saveUserPrefs(email, { hiddenBoardIds: arr }).catch(() => {})
-      return next
-    })
-  }
+  // toggleBoardHidden and hiddenIds are provided by AccessContext
 
   function handleConnect() {
     setGoogleLoading(true)

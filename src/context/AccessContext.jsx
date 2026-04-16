@@ -6,7 +6,7 @@ import {
   ACCESS_DOC, isAdmin, canAdminister,
   getAccessibleBoardIds, saveAccessConfig, getUserBoardRole,
 } from '../api/access'
-import { fetchUserPrefs } from '../api/userPrefs'
+import { fetchUserPrefs, saveUserPrefs } from '../api/userPrefs'
 
 const AccessContext = createContext()
 
@@ -27,6 +27,10 @@ export function AccessProvider({ children }) {
   const [authReady,   setAuthReady]   = useState(false)
   const [error,       setError]       = useState(null)
   const [email,       setEmail]       = useState(null)
+  const [hiddenIds,   setHiddenIds]   = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('hidden_board_ids') || '[]')) }
+    catch { return new Set() }
+  })
 
   // Track Firebase Auth state; seed user preferences from Firestore on login
   useEffect(() => {
@@ -36,8 +40,10 @@ export function AccessProvider({ children }) {
       if (user?.email) {
         try {
           const prefs = await fetchUserPrefs(user.email)
-          if (Array.isArray(prefs.hiddenBoardIds))
+          if (Array.isArray(prefs.hiddenBoardIds)) {
             localStorage.setItem('hidden_board_ids', JSON.stringify(prefs.hiddenBoardIds))
+            setHiddenIds(new Set(prefs.hiddenBoardIds))
+          }
           if (prefs.passTracking && typeof prefs.passTracking === 'object')
             localStorage.setItem('pass_tracking', JSON.stringify(prefs.passTracking))
         } catch { /* non-fatal */ }
@@ -76,6 +82,18 @@ export function AccessProvider({ children }) {
   /** No-op: Firebase Auth state updates reactively via onAuthStateChanged. */
   const refreshEmail = useCallback(() => {}, [])
 
+  /** Toggle a board's visibility and persist to localStorage + Firestore. */
+  const toggleBoardHidden = useCallback((id) => {
+    setHiddenIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      const arr = [...next]
+      localStorage.setItem('hidden_board_ids', JSON.stringify(arr))
+      saveUserPrefs(email, { hiddenBoardIds: arr }).catch(() => {})
+      return next
+    })
+  }, [email])
+
   /** Optimistically update local state, then persist to Firestore. */
   const updateConfig = useCallback((next) => {
     setConfigState(next)
@@ -97,6 +115,7 @@ export function AccessProvider({ children }) {
       accessibleIds,
       getBoardRole,
       reload,
+      hiddenIds, toggleBoardHidden,
     }}>
       {children}
     </AccessContext.Provider>
