@@ -33,8 +33,11 @@ export function AccessProvider({ children }) {
   })
 
   // Track Firebase Auth state; seed user preferences from Firestore on login
+  // Also track authUser so the onSnapshot can re-subscribe when auth changes
+  const [authUser, setAuthUser] = useState(undefined) // undefined = not yet resolved
   useEffect(() => {
     return onAuthStateChanged(auth, async user => {
+      setAuthUser(user || null)
       setEmail(user?.email || null)
       setAuthReady(true)
       if (user?.email) {
@@ -51,8 +54,10 @@ export function AccessProvider({ children }) {
     })
   }, [])
 
-  // Real-time listener on config/access — all users see access changes immediately
+  // Real-time listener on config/access — re-subscribes when auth state changes
+  // so that a fresh login in incognito gets a new listener with valid credentials.
   useEffect(() => {
+    if (authUser === undefined) return // auth not yet resolved
     setConfigReady(false)
     const unsub = onSnapshot(
       ACCESS_DOC,
@@ -66,12 +71,16 @@ export function AccessProvider({ children }) {
       err => {
         console.error('AccessContext snapshot error:', err)
         setError(err.message)
-        setConfigState({ admins: [], boards: {} })
+        // Only fall back to empty config if user is not authenticated;
+        // an authenticated user hitting an error is a real problem, not bootstrap.
+        if (!authUser) {
+          setConfigState({ admins: [], boards: {} })
+        }
         setConfigReady(true)
       },
     )
     return unsub
-  }, [])
+  }, [authUser])
 
   /** Manual reload — kept for callers that explicitly want to re-fetch. */
   const reload = useCallback(() => {

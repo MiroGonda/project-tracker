@@ -17,13 +17,15 @@ export default function Sidebar() {
 
   const { admin, canAdmin, accessibleIds, loading: configLoading, email, config, hiddenIds } = useAccess()
 
+  // Re-fetch boards when config finishes loading (API keys may have just been seeded)
   useEffect(() => {
+    if (configLoading) return
     const host   = localStorage.getItem('phobos_host')   || localStorage.getItem('ares_host')
     const apiKey = localStorage.getItem('phobos_api_key') || localStorage.getItem('ares_api_key')
     if (!host || !apiKey) return
     setBoardsLoading(true)
     listBoards().then(setApiBoards).catch(() => {}).finally(() => setBoardsLoading(false))
-  }, [])
+  }, [configLoading])
 
   // hiddenIds is now provided by AccessContext for cross-component reactivity
 
