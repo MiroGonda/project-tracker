@@ -10,7 +10,7 @@ import {
   Circle, CheckCircle2, Calendar, Search, Minimize2, Settings2, Layers,
   Inbox, GanttChart, CalendarDays, ChevronLeft, ChevronRight,
   Plus, Link2, Eye, FileText, ImagePlus, Users,
-  BarChart2, Table2, LayoutList, Pencil,
+  BarChart2, Table2, LayoutList, Pencil, ClipboardCopy,
 } from 'lucide-react'
 import { boardCards, boardMovements, boardSummary, cycleTime } from '../api/phobos'
 import { subscribeRequests, saveRequest, deleteRequest, migrateLocalRequests } from '../api/requests'
@@ -2377,6 +2377,7 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
   const [panelTab,      setPanelTab]      = useState('fields')
   const [cardSearch,    setCardSearch]    = useState('')
   const [excludeDone,   setExcludeDone]   = useState(true)
+  const [opsCopied,     setOpsCopied]     = useState(false)
   const [mcCardFilter,  setMcCardFilter]  = useState('')
   const [mcDropOpen,    setMcDropOpen]    = useState(false)
   const [cardTabMode,   setCardTabMode]   = useState('view') // 'view' = read-only summary, 'edit' = attach/detach
@@ -2799,6 +2800,31 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
                   <input className="input w-full text-sm" value={editing.spoc} onChange={fUpdate('spoc')} placeholder="Contact name…" />
                 </div>
               </div>
+              {/* For Ops — auto-generated copy field */}
+              {editing.mc && editing.date && editing.name && (() => {
+                const month = new Date(editing.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'long' })
+                const opsText = `${editing.mc} - ${month} - ${editing.name}`
+                return (
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-text-muted mb-1.5 font-medium">For Ops</label>
+                    <div className="flex items-center gap-2">
+                      <div className="input flex-1 text-sm bg-bg/50 text-text-primary select-all truncate">{opsText}</div>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(opsText)
+                          setOpsCopied(true)
+                          setTimeout(() => setOpsCopied(false), 1500)
+                        }}
+                        className={`shrink-0 p-2 rounded-lg border transition-colors ${opsCopied ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' : 'border-border text-text-muted hover:text-text-primary hover:bg-white/5'}`}
+                        title="Copy to clipboard"
+                      >
+                        {opsCopied ? <Check size={14} /> : <ClipboardCopy size={14} />}
+                      </button>
+                    </div>
+                  </div>
+                )
+              })()}
+
               {/* Brief */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
