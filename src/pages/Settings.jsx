@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Sun, Moon, CheckCircle2, Circle, Eye, EyeOff, Layers, X, Settings as SettingsIcon, Plus, UserX } from 'lucide-react'
+import { Sun, Moon, CheckCircle2, Circle, Eye, EyeOff, Layers, X, Settings as SettingsIcon, Plus, UserX, Calendar } from 'lucide-react'
 import { useTheme } from '../context/ThemeContext'
 import { useAccess } from '../context/AccessContext'
 import {
@@ -220,6 +220,8 @@ export default function Settings() {
 
   // Per-board integrations modal
   const [integrationsFor, setIntegrationsFor] = useState(null)
+  // Board dates expand
+  const [datesFor, setDatesFor] = useState(null)
 
   // Board visibility
   const [allBoards, setAllBoards] = useState([])
@@ -259,6 +261,13 @@ export default function Settings() {
     || [...accessibleIds].some(id => { const r = getBoardRole(id); return r === 'frost' || r === 'admin' })
 
   // toggleBoardHidden and hiddenIds are provided by AccessContext
+
+  function handleBoardDate(boardId, field, value) {
+    if (!config) return
+    const boards = { ...config.boards }
+    boards[boardId] = { ...boards[boardId], [field]: value || null }
+    updateConfig({ ...config, boards })
+  }
 
   function handleConnect() {
     setGoogleLoading(true)
@@ -409,6 +418,25 @@ export default function Settings() {
                             {passLoading ? '…' : 'Passes'}
                           </button>
                         )}
+                        {/* Dates */}
+                        {admin && (() => {
+                          const bcfg = config?.boards?.[b.id] || {}
+                          const hasDates = !!(bcfg.startDate || bcfg.endDate)
+                          return (
+                            <button
+                              onClick={() => setDatesFor(prev => prev === b.id ? null : b.id)}
+                              className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] transition-colors ${
+                                hasDates
+                                  ? 'border-cyan-500/30 text-cyan-400 bg-cyan-500/5 hover:bg-cyan-500/10'
+                                  : 'border-border text-text-muted hover:bg-white/5'
+                              }`}
+                              title="Set project start/end dates"
+                            >
+                              <Calendar size={10} />
+                              Dates
+                            </button>
+                          )
+                        })()}
                         {/* Integrations cog */}
                         <button
                           onClick={() => setIntegrationsFor(b)}
@@ -444,6 +472,37 @@ export default function Settings() {
                         <ExternalUserManager boardId={b.id} config={config} updateConfig={updateConfig} />
                       </div>
                     )}
+                    {/* Inline date editor */}
+                    {datesFor === b.id && (() => {
+                      const bcfg = config?.boards?.[b.id] || {}
+                      return (
+                        <div className="px-3 pb-3 flex items-center gap-3 border-t border-border/40 pt-2">
+                          <label className="flex items-center gap-1.5 text-[10px] text-text-muted">
+                            Start
+                            <input type="date" className="input text-xs py-1 w-32"
+                              value={bcfg.startDate || ''}
+                              onChange={e => handleBoardDate(b.id, 'startDate', e.target.value)}
+                            />
+                          </label>
+                          <label className="flex items-center gap-1.5 text-[10px] text-text-muted">
+                            End
+                            <input type="date" className="input text-xs py-1 w-32"
+                              value={bcfg.endDate || ''}
+                              onChange={e => handleBoardDate(b.id, 'endDate', e.target.value)}
+                            />
+                          </label>
+                          {(bcfg.startDate || bcfg.endDate) && (
+                            <button onClick={() => {
+                              if (!config) return
+                              const boards = { ...config.boards }
+                              boards[b.id] = { ...boards[b.id], startDate: null, endDate: null }
+                              updateConfig({ ...config, boards })
+                            }}
+                              className="text-[10px] text-red-400 hover:text-red-300 transition-colors ml-auto">Clear</button>
+                          )}
+                        </div>
+                      )
+                    })()}
                   </div>
                 )
               })}
