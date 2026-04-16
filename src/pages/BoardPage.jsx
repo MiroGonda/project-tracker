@@ -3151,6 +3151,7 @@ function TimelineTab({ boardId, cards, loading, requests, boardCfg }) {
   const today_d  = new Date()
   const [calYear,  setCalYear]  = useState(today_d.getFullYear())
   const [calMonth, setCalMonth] = useState(today_d.getMonth())
+  const [ganttFilter, setGanttFilter] = useState('active') // 'active' or 'closed'
 
   const firstDay  = new Date(calYear, calMonth, 1)
   const lastDay   = new Date(calYear, calMonth + 1, 0)
@@ -3164,46 +3165,39 @@ function TimelineTab({ boardId, cards, loading, requests, boardCfg }) {
   for (let i = 0; i < startDow; i++) cells.push(null)
   for (let d = 1; d <= totalDays; d++) cells.push(d)
 
-  // Cards with due dates this month
+  // Requests with deadlines this month
   const dueDates = useMemo(() => {
     const map = {}
-    for (const c of cards) {
-      const due = extractDate(c)
-      if (!due) continue
-      const d = new Date(due)
-      if (d.getFullYear() === calYear && d.getMonth() === calMonth) {
-        const day = d.getDate()
-        if (!map[day]) map[day] = []
-        map[day].push({ type: 'card', card: c })
-      }
-    }
-    // Requests with deadlines this month
     for (const r of requests) {
       if (!r.deadline) continue
       const d = new Date(r.deadline + 'T00:00:00')
       if (d.getFullYear() === calYear && d.getMonth() === calMonth) {
         const day = d.getDate()
         if (!map[day]) map[day] = []
-        map[day].push({ type: 'request', req: r })
+        map[day].push(r)
       }
     }
     return map
-  }, [cards, requests, calYear, calMonth])
+  }, [requests, calYear, calMonth])
 
   const todayDay = today_d.getFullYear() === calYear && today_d.getMonth() === calMonth
     ? today_d.getDate() : null
 
-  // Gantt: all requests, bar from date filed to deadline
+  // Gantt: filtered by active/closed toggle, bar from date filed to deadline
   const ganttItems = useMemo(() => {
-    return [...requests].sort((a, b) => {
-      // Sort by deadline asc (no deadline = last), then by date filed
-      const da = a.deadline || '9999'
-      const db = b.deadline || '9999'
-      if (da < db) return -1
-      if (da > db) return 1
-      return (a.date || '') < (b.date || '') ? -1 : 1
-    })
-  }, [requests])
+    return [...requests]
+      .filter(r => {
+        const closed = (r.status || 'open') === 'closed'
+        return ganttFilter === 'closed' ? closed : !closed
+      })
+      .sort((a, b) => {
+        const da = a.deadline || '9999'
+        const db = b.deadline || '9999'
+        if (da < db) return -1
+        if (da > db) return 1
+        return (a.date || '') < (b.date || '') ? -1 : 1
+      })
+  }, [requests, ganttFilter])
 
   const ganttStart = useMemo(() => {
     // Start at earliest request filed date, or today-7
@@ -3332,40 +3326,38 @@ function TimelineTab({ boardId, cards, loading, requests, boardCfg }) {
             </div>
 
             {/* Stat cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <div className="bg-bg rounded-lg border border-border/50 p-3">
-                <span className="text-[10px] uppercase tracking-wider text-text-muted/60 font-medium block mb-1">Days Remaining</span>
-                <span className={`text-xl font-bold tabular-nums ${duration.isOverdue ? 'text-red-400' : 'text-text-primary'}`}>
-                  {duration.isOverdue ? 0 : duration.remainCal}
-                </span>
-                <span className="text-[11px] text-text-muted block mt-0.5">
-                  of {duration.totalCal} total
-                </span>
-              </div>
-              <div className="bg-bg rounded-lg border border-border/50 p-3">
-                <span className="text-[10px] uppercase tracking-wider text-text-muted/60 font-medium block mb-1">Weeks Remaining</span>
-                <span className={`text-xl font-bold tabular-nums ${duration.isOverdue ? 'text-red-400' : 'text-text-primary'}`}>
-                  {duration.isOverdue ? 0 : duration.remainWeeks}
-                  {!duration.isOverdue && duration.remainExtra > 0 && <span className="text-sm font-medium text-text-muted ml-0.5">+{duration.remainExtra}d</span>}
-                </span>
-              </div>
-              <div className="bg-bg rounded-lg border border-border/50 p-3">
-                <span className="text-[10px] uppercase tracking-wider text-text-muted/60 font-medium block mb-1">Business Days Left</span>
-                <span className={`text-xl font-bold tabular-nums ${duration.isOverdue ? 'text-red-400' : 'text-cyan-400'}`}>
-                  {duration.isOverdue ? 0 : duration.remainBiz}
-                </span>
-                <span className="text-[11px] text-text-muted block mt-0.5">
-                  of {duration.totalBiz} total · {duration.elapsedBiz} elapsed
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-bg rounded-lg border border-border/50 p-4">
+                <span className="text-[10px] uppercase tracking-wider text-text-muted/60 font-medium block mb-2">Remaining</span>
+                {duration.isOverdue ? (
+                  <span className="text-xl font-bold tabular-nums text-red-400">0 days</span>
+                ) : (
+                  <div className="space-y-1.5">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-xl font-bold tabular-nums text-text-primary">{duration.remainCal}</span>
+                      <span className="text-xs text-text-muted">days</span>
+                      <span className="text-text-muted/30 text-xs">·</span>
+                      <span className="text-lg font-bold tabular-nums text-text-primary">{duration.remainWeeks}</span>
+                      <span className="text-xs text-text-muted">weeks{duration.remainExtra > 0 ? ` ${duration.remainExtra}d` : ''}</span>
+                    </div>
+                    <div className="text-[11px] text-cyan-400 tabular-nums">
+                      ({duration.remainBiz} business days)
+                    </div>
+                  </div>
+                )}
+                <span className="text-[11px] text-text-muted block mt-1.5">
+                  of {duration.totalCal} days / {duration.totalBiz} business days total
                 </span>
               </div>
-              <div className="bg-bg rounded-lg border border-border/50 p-3">
-                <span className="text-[10px] uppercase tracking-wider text-text-muted/60 font-medium block mb-1">Elapsed</span>
-                <span className="text-xl font-bold tabular-nums text-text-primary">
-                  {duration.elapsedCal}<span className="text-sm font-medium text-text-muted ml-0.5">d</span>
-                </span>
-                <span className="text-[11px] text-text-muted block mt-0.5">
-                  {duration.elapsedBiz} business days
-                </span>
+              <div className="bg-bg rounded-lg border border-border/50 p-4">
+                <span className="text-[10px] uppercase tracking-wider text-text-muted/60 font-medium block mb-2">Elapsed</span>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-xl font-bold tabular-nums text-text-primary">{duration.elapsedCal}</span>
+                  <span className="text-xs text-text-muted">days</span>
+                </div>
+                <div className="text-[11px] text-cyan-400 tabular-nums mt-1.5">
+                  ({duration.elapsedBiz} business days)
+                </div>
               </div>
             </div>
           </div>
@@ -3378,9 +3370,9 @@ function TimelineTab({ boardId, cards, loading, requests, boardCfg }) {
           <div className="flex items-center gap-4">
             <h3 className="text-sm font-semibold text-text-primary">Calendar</h3>
             <div className="flex items-center gap-3 text-[10px] text-text-muted">
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-accent/40 inline-block" /> Cards</span>
               <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-purple-500/40 inline-block" /> Requests</span>
               <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-rose-500/30 inline-block" /> Holiday</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-white/5 border border-border/40 inline-block" /> Weekend</span>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -3408,44 +3400,30 @@ function TimelineTab({ boardId, cards, loading, requests, boardCfg }) {
               const isWeekend = ((startDow + day - 1) % 7 === 0) || ((startDow + day - 1) % 7 === 6)
               const isoDay    = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
               const holiday   = PH_HOLIDAYS[isoDay]
-              const dayItems  = dueDates[day] || []
-              const dayCards  = dayItems.filter(x => x.type === 'card').map(x => x.card)
-              const dayReqs   = dayItems.filter(x => x.type === 'request').map(x => x.req)
+              const dayReqs   = dueDates[day] || []
               return (
                 <div key={day} className={`min-h-[80px] rounded-lg p-1.5 border transition-colors ${
                   isToday   ? 'border-accent/50 bg-accent/5' :
                   holiday   ? 'border-rose-500/20 bg-rose-500/5' :
+                  isWeekend ? 'border-border/30 bg-white/[0.015]' :
                   'border-border/40 hover:border-border hover:bg-white/[0.02]'
                 }`}>
                   <div className="flex items-start justify-between mb-1">
                     <span className={`text-xs font-medium ${
-                      isToday ? 'text-accent' : isWeekend ? 'text-text-muted/50' : 'text-text-muted'
+                      isToday ? 'text-accent' : isWeekend ? 'text-text-muted/35' : 'text-text-muted'
                     }`}>{day}</span>
                     {holiday && (
                       <span className="text-[8px] font-bold text-rose-400 leading-tight text-right block" title={holiday}>{holiday}</span>
                     )}
                   </div>
                   <div className="flex flex-col gap-0.5">
-                    {/* Card chips (blue/accent) */}
-                    {dayCards.slice(0, 2).map((c, j) => {
-                      const mc = extractMcNumber(c.name)
-                      return (
-                        <div key={`c${j}`} className="truncate text-[9px] px-1 py-0.5 rounded bg-accent/10 text-accent leading-tight">
-                          {mc || c.name}
-                        </div>
-                      )
-                    })}
-                    {/* Request chips (purple) */}
-                    {dayReqs.slice(0, 2).map((r, j) => (
+                    {dayReqs.slice(0, 3).map((r, j) => (
                       <div key={`r${j}`} className="truncate text-[9px] px-1 py-0.5 rounded bg-purple-500/15 text-purple-300 leading-tight">
                         {r.mc || r.name}
                       </div>
                     ))}
-                    {(dayCards.length + dayReqs.length) > 4 && (
-                      <div className="text-[9px] text-text-muted/60 px-1">+{dayCards.length + dayReqs.length - 4} more</div>
-                    )}
-                    {dayCards.length <= 2 && dayCards.length > 0 && dayReqs.length > 2 && (
-                      <div className="text-[9px] text-text-muted/60 px-1">+{dayReqs.length - 2} more</div>
+                    {dayReqs.length > 3 && (
+                      <div className="text-[9px] text-text-muted/60 px-1">+{dayReqs.length - 3} more</div>
                     )}
                   </div>
                 </div>
@@ -3455,15 +3433,31 @@ function TimelineTab({ boardId, cards, loading, requests, boardCfg }) {
         </div>
       </div>
 
-      {/* ── Gantt — Requests ── */}
+      {/* ── Gantt Chart ── */}
       <div className="bg-surface border border-border rounded-xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-border flex items-center gap-3">
-          <h3 className="text-sm font-semibold text-text-primary">Gantt — Requests</h3>
-          <div className="flex items-center gap-3 text-[10px] text-text-muted">
-            <span className="flex items-center gap-1"><span className="w-2 h-1.5 rounded-sm bg-indigo-500/50 inline-block" /> Active</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-1.5 rounded-sm bg-red-500/50 inline-block" /> Overdue</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-1.5 rounded-sm bg-emerald-500/50 inline-block" /> Closed</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-1.5 rounded-sm bg-white/10 border border-border inline-block" /> No deadline</span>
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <h3 className="text-sm font-semibold text-text-primary">Gantt Chart</h3>
+            <div className="flex items-center gap-3 text-[10px] text-text-muted">
+              {ganttFilter === 'active' && (
+                <>
+                  <span className="flex items-center gap-1"><span className="w-2 h-1.5 rounded-sm bg-indigo-500/50 inline-block" /> Active</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-1.5 rounded-sm bg-red-500/50 inline-block" /> Overdue</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-1.5 rounded-sm bg-white/10 border border-border inline-block" /> No deadline</span>
+                </>
+              )}
+              {ganttFilter === 'closed' && (
+                <span className="flex items-center gap-1"><span className="w-2 h-1.5 rounded-sm bg-emerald-500/50 inline-block" /> Closed</span>
+              )}
+            </div>
+          </div>
+          <div className="flex border border-border rounded-lg overflow-hidden text-[10px]">
+            {[['active', 'Active'], ['closed', 'Closed']].map(([key, label]) => (
+              <button key={key} onClick={() => setGanttFilter(key)}
+                className={`px-3 py-1 transition-colors ${ganttFilter === key ? 'bg-accent/20 text-accent' : 'text-text-muted hover:bg-white/5'}`}>
+                {label}
+              </button>
+            ))}
           </div>
         </div>
         {ganttItems.length === 0 ? (
