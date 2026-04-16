@@ -10,7 +10,7 @@ import {
   Circle, CheckCircle2, Calendar, Search, Minimize2, Settings2, Layers,
   Inbox, GanttChart, CalendarDays, ChevronLeft, ChevronRight,
   Plus, Link2, Eye, FileText, ImagePlus, Users,
-  BarChart2, Table2, LayoutList,
+  BarChart2, Table2, LayoutList, Pencil,
 } from 'lucide-react'
 import { boardCards, boardMovements, boardSummary, cycleTime } from '../api/phobos'
 import { subscribeRequests, saveRequest, deleteRequest, migrateLocalRequests } from '../api/requests'
@@ -2379,6 +2379,7 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
   const [excludeDone,   setExcludeDone]   = useState(true)
   const [mcCardFilter,  setMcCardFilter]  = useState('')
   const [mcDropOpen,    setMcDropOpen]    = useState(false)
+  const [cardTabMode,   setCardTabMode]   = useState('view') // 'view' = read-only summary, 'edit' = attach/detach
   const [reqSort,       setReqSort]       = useState({ key: 'item', dir: 'asc' })
   const briefRef      = useRef(null)
   const imageInputRef = useRef(null)
@@ -2412,7 +2413,7 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
   }
 
   function openNew() {
-    setIsNew(true); setBriefMode('edit'); setPanelTab('fields')
+    setIsNew(true); setBriefMode('edit'); setPanelTab('fields'); setCardTabMode('edit')
     setEditing({
       id: `req_${Date.now()}`, item: nextItem(), mc: suggestNextMc(),
       date: new Date().toISOString().split('T')[0],
@@ -2421,7 +2422,7 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
   }
 
   function openEdit(req) {
-    setIsNew(false); setBriefMode('edit'); setPanelTab('fields')
+    setIsNew(false); setBriefMode('edit'); setPanelTab('fields'); setCardTabMode('view')
     setEditing({ attachedCardIds: [], status: 'open', ...req })
   }
 
@@ -2654,12 +2655,12 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
                       </td>
                       <td className="py-3 px-3 text-xs text-text-muted whitespace-nowrap">{fmtFiled(r.date)}</td>
                       <td className="py-3 px-3 min-w-0">
-                        <div className="font-medium text-text-primary truncate max-w-xs">
+                        <div className="font-medium text-text-primary truncate">
                           {r.name || <span className="italic text-text-muted/40 font-normal">Untitled</span>}
                         </div>
                         {briefText && (
-                          <div className="text-[11px] text-text-muted/55 truncate max-w-xs mt-0.5 italic">
-                            {briefText.slice(0, 80)}{briefText.length > 80 ? '…' : ''}
+                          <div className="text-[11px] text-text-muted/55 truncate mt-0.5 italic">
+                            {briefText.slice(0, 120)}{briefText.length > 120 ? '…' : ''}
                           </div>
                         )}
                       </td>
@@ -2873,109 +2874,186 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
                 ) : null
               })()}
 
-              {/* Search & filters */}
-              <div className="px-5 py-3 border-b border-border shrink-0 space-y-2">
-                <div className="flex items-center gap-2">
-                  {/* MC filter dropdown */}
-                  <div className="relative shrink-0" ref={mcDropRef}>
-                    <button onClick={() => setMcDropOpen(v => !v)}
-                      className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${mcCardFilter ? 'border-accent/50 bg-accent/10 text-accent' : 'border-border bg-bg text-text-muted hover:text-text-primary'}`}>
-                      <span>{mcCardFilter || 'MC'}</span>
-                      <ChevronDown size={10} />
-                    </button>
-                    {mcDropOpen && (
-                      <div className="absolute top-full left-0 mt-1 bg-surface border border-border rounded-lg shadow-xl z-50 max-h-48 overflow-y-auto min-w-[100px]">
-                        <button onClick={() => { setMcCardFilter(''); setMcDropOpen(false) }}
-                          className={`block w-full text-left px-3 py-1.5 text-xs hover:bg-white/5 ${!mcCardFilter ? 'text-accent' : 'text-text-muted'}`}>All</button>
-                        {cardMcOptions.map(mc => (
-                          <button key={mc} onClick={() => { setMcCardFilter(mc); setMcDropOpen(false) }}
-                            className={`block w-full text-left px-3 py-1.5 text-xs font-mono hover:bg-white/5 ${mcCardFilter === mc ? 'text-accent' : 'text-text-primary'}`}>{mc}</button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  {/* Name search */}
-                  <div className="flex-1 flex items-center gap-1.5 px-2.5 py-1.5 bg-bg border border-border rounded-lg">
-                    <Search size={11} className="text-text-muted shrink-0" />
-                    <input
-                      className="bg-transparent text-xs text-text-primary outline-none flex-1 placeholder:text-text-muted"
-                      placeholder="Search by name…"
-                      value={cardSearch}
-                      onChange={e => setCardSearch(e.target.value)}
-                      autoFocus
-                    />
-                    {cardSearch && (
-                      <button onClick={() => setCardSearch('')} className="text-text-muted hover:text-text-primary"><X size={10} /></button>
-                    )}
-                  </div>
-                </div>
-                {/* Exclude done toggle */}
-                <button onClick={() => setExcludeDone(v => !v)}
-                  className="flex items-center gap-1.5 text-[11px] text-text-muted hover:text-text-primary transition-colors">
-                  <div className={`w-7 h-3.5 rounded-full transition-colors relative ${excludeDone ? 'bg-accent/60' : 'bg-white/10'}`}>
-                    <div className={`absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white shadow transition-all ${excludeDone ? 'left-[14px]' : 'left-0.5'}`} />
-                  </div>
-                  {excludeDone ? 'Hiding done cards' : 'Showing done cards'}
+              {/* Mode toggle header */}
+              <div className="flex items-center justify-between px-5 py-2.5 border-b border-border shrink-0">
+                <span className="text-[10px] uppercase tracking-wider text-text-muted font-medium">
+                  {cardTabMode === 'view' ? `${editing.attachedCardIds?.length || 0} attached` : 'Assign Cards'}
+                </span>
+                <button
+                  onClick={() => setCardTabMode(m => m === 'view' ? 'edit' : 'view')}
+                  className="flex items-center gap-1.5 text-[11px] text-text-muted hover:text-accent transition-colors px-2 py-1 rounded-md hover:bg-accent/10">
+                  {cardTabMode === 'view'
+                    ? <><Pencil size={10} /> Edit</>
+                    : <><Eye size={10} /> View</>
+                  }
                 </button>
               </div>
 
-              {/* Card list */}
-              <div className="flex-1 overflow-y-auto">
-                {attachableCards.length === 0 ? (
-                  <div className="flex items-center justify-center h-24 text-xs text-text-muted">No cards found.</div>
-                ) : (
-                  attachableCards.map(c => {
-                    const cardId    = c.id || c.cardId
-                    const checked   = editing.attachedCardIds?.includes(cardId)
-                    const mc        = extractMcNumber(c.name)
-                    const lane      = LANE_MAP[extractList(c)]
-                    const status    = lane?.status
-                    const labels    = extractLabels(c)
-                    const isDone    = (doneCards || []).some(d => (d.id || d.cardId) === cardId)
-                    return (
-                      <div key={cardId}
-                        onClick={() => toggleAttach(cardId)}
-                        className={`relative flex items-start gap-3 px-5 py-3 border-b border-border/30 cursor-pointer transition-colors ${checked ? 'bg-accent/5' : 'hover:bg-white/[0.025]'}`}>
-                        {/* Work/Process badge — top right */}
-                        {(() => {
-                          const cardType = getCardType(c)
-                          return (
-                            <span className={`absolute top-2 right-4 text-[9px] font-semibold px-1.5 py-0.5 rounded-full
-                              ${cardType === 'Process' ? 'bg-purple-500/15 text-purple-300' : 'bg-indigo-500/15 text-indigo-300'}`}>
-                              {cardType}
-                            </span>
-                          )
-                        })()}
-                        <div className="mt-0.5 shrink-0">
-                          <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${checked ? 'bg-accent border-accent' : 'border-border'}`}>
-                            {checked && <Check size={10} className="text-white" />}
-                          </div>
-                        </div>
-                        <div className="flex-1 min-w-0 pr-12">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            {mc && <span className="text-[10px] font-mono font-semibold text-indigo-300 bg-indigo-500/10 px-1.5 py-0.5 rounded">{mc}</span>}
-                            <span className="text-xs text-text-primary truncate">{c.name}</span>
-                            {isDone && <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400">Done</span>}
-                          </div>
-                          <div className="flex items-center gap-2 mt-1 flex-wrap">
-                            <span className="text-[10px] text-text-muted/60 bg-white/5 px-1.5 py-0.5 rounded truncate max-w-[160px]">{extractList(c)}</span>
-                            {status && !isDone && (
-                              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded"
-                                style={{ background: (STATUS_COLOR[status] || '#6b7280') + '22', color: STATUS_COLOR[status] || '#6b7280' }}>
-                                {status}
+              {/* ── View mode: clean read-only list of attached cards ── */}
+              {cardTabMode === 'view' && (
+                <div className="flex-1 overflow-y-auto">
+                  {!editing.attachedCardIds?.length ? (
+                    <div className="flex flex-col items-center justify-center h-32 gap-2 text-text-muted">
+                      <Layers size={24} className="text-text-muted/20" />
+                      <p className="text-xs">No cards attached</p>
+                      <button onClick={() => setCardTabMode('edit')} className="text-[11px] text-accent hover:underline">Assign cards</button>
+                    </div>
+                  ) : (
+                    (() => {
+                      const attachedIds = new Set(editing.attachedCardIds)
+                      const attached = allCards
+                        .filter(c => attachedIds.has(c.id || c.cardId))
+                        .sort((a, b) => {
+                          const aP = getCardType(a) === 'Process' ? 0 : 1
+                          const bP = getCardType(b) === 'Process' ? 0 : 1
+                          return aP - bP
+                        })
+                      return attached.map(c => {
+                        const cardId   = c.id || c.cardId
+                        const mc       = extractMcNumber(c.name)
+                        const lane     = LANE_MAP[extractList(c)]
+                        const status   = lane?.status
+                        const cardType = getCardType(c)
+                        const isDone   = (doneCards || []).some(d => (d.id || d.cardId) === cardId)
+                        const passes   = passMap?.get(cardId)
+                        return (
+                          <div key={cardId} className="flex flex-col gap-1.5 px-5 py-3 border-b border-border/30">
+                            <div className="flex items-center gap-2">
+                              <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full shrink-0
+                                ${cardType === 'Process' ? 'bg-purple-500/15 text-purple-300' : 'bg-indigo-500/15 text-indigo-300'}`}>
+                                {cardType}
                               </span>
-                            )}
-                            {labels.slice(0, 2).map((l, i) => {
-                              const s = labelStyle(l.color)
-                              return <span key={i} className={`text-[10px] px-1.5 py-0.5 rounded ${s.bg} ${s.text}`}>{l.name}</span>
-                            })}
+                              {mc && <span className="text-[10px] font-mono font-semibold text-indigo-300 bg-indigo-500/10 px-1.5 py-0.5 rounded shrink-0">{mc}</span>}
+                              <span className="text-xs text-text-primary truncate flex-1">{c.name}</span>
+                            </div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {isDone ? (
+                                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ background: '#22c55e22', color: '#22c55e' }}>Done</span>
+                              ) : status ? (
+                                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded"
+                                  style={{ background: (STATUS_COLOR[status] || '#6b7280') + '22', color: STATUS_COLOR[status] || '#6b7280' }}>
+                                  {status}
+                                </span>
+                              ) : null}
+                              {passMap && passes && (
+                                <>
+                                  {passes.first  && <span className="text-[10px] text-text-muted bg-white/5 px-1.5 py-0.5 rounded">P1: {fmtFiled(passes.first.split('T')[0])}</span>}
+                                  {passes.second && <span className="text-[10px] text-text-muted bg-white/5 px-1.5 py-0.5 rounded">P2: {fmtFiled(passes.second.split('T')[0])}</span>}
+                                  {passes.third  && <span className="text-[10px] text-text-muted bg-white/5 px-1.5 py-0.5 rounded">P3: {fmtFiled(passes.third.split('T')[0])}</span>}
+                                </>
+                              )}
+                            </div>
                           </div>
-                        </div>
+                        )
+                      })
+                    })()
+                  )}
+                </div>
+              )}
+
+              {/* ── Edit mode: search, filter, attach/detach ── */}
+              {cardTabMode === 'edit' && (
+                <>
+                  {/* Search & filters */}
+                  <div className="px-5 py-3 border-b border-border shrink-0 space-y-2">
+                    <div className="flex items-center gap-2">
+                      {/* MC filter dropdown */}
+                      <div className="relative shrink-0" ref={mcDropRef}>
+                        <button onClick={() => setMcDropOpen(v => !v)}
+                          className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${mcCardFilter ? 'border-accent/50 bg-accent/10 text-accent' : 'border-border bg-bg text-text-muted hover:text-text-primary'}`}>
+                          <span>{mcCardFilter || 'MC'}</span>
+                          <ChevronDown size={10} />
+                        </button>
+                        {mcDropOpen && (
+                          <div className="absolute top-full left-0 mt-1 bg-surface border border-border rounded-lg shadow-xl z-50 max-h-48 overflow-y-auto min-w-[100px]">
+                            <button onClick={() => { setMcCardFilter(''); setMcDropOpen(false) }}
+                              className={`block w-full text-left px-3 py-1.5 text-xs hover:bg-white/5 ${!mcCardFilter ? 'text-accent' : 'text-text-muted'}`}>All</button>
+                            {cardMcOptions.map(mc => (
+                              <button key={mc} onClick={() => { setMcCardFilter(mc); setMcDropOpen(false) }}
+                                className={`block w-full text-left px-3 py-1.5 text-xs font-mono hover:bg-white/5 ${mcCardFilter === mc ? 'text-accent' : 'text-text-primary'}`}>{mc}</button>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    )
-                  })
-                )}
-              </div>
+                      {/* Name search */}
+                      <div className="flex-1 flex items-center gap-1.5 px-2.5 py-1.5 bg-bg border border-border rounded-lg">
+                        <Search size={11} className="text-text-muted shrink-0" />
+                        <input
+                          className="bg-transparent text-xs text-text-primary outline-none flex-1 placeholder:text-text-muted"
+                          placeholder="Search by name…"
+                          value={cardSearch}
+                          onChange={e => setCardSearch(e.target.value)}
+                          autoFocus
+                        />
+                        {cardSearch && (
+                          <button onClick={() => setCardSearch('')} className="text-text-muted hover:text-text-primary"><X size={10} /></button>
+                        )}
+                      </div>
+                    </div>
+                    {/* Exclude done toggle */}
+                    <button onClick={() => setExcludeDone(v => !v)}
+                      className="flex items-center gap-1.5 text-[11px] text-text-muted hover:text-text-primary transition-colors">
+                      <div className={`w-7 h-3.5 rounded-full transition-colors relative ${excludeDone ? 'bg-accent/60' : 'bg-white/10'}`}>
+                        <div className={`absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white shadow transition-all ${excludeDone ? 'left-[14px]' : 'left-0.5'}`} />
+                      </div>
+                      {excludeDone ? 'Hiding done cards' : 'Showing done cards'}
+                    </button>
+                  </div>
+
+                  {/* Card list */}
+                  <div className="flex-1 overflow-y-auto">
+                    {attachableCards.length === 0 ? (
+                      <div className="flex items-center justify-center h-24 text-xs text-text-muted">No cards found.</div>
+                    ) : (
+                      attachableCards.map(c => {
+                        const cardId    = c.id || c.cardId
+                        const checked   = editing.attachedCardIds?.includes(cardId)
+                        const mc        = extractMcNumber(c.name)
+                        const lane      = LANE_MAP[extractList(c)]
+                        const status    = lane?.status
+                        const isDone    = (doneCards || []).some(d => (d.id || d.cardId) === cardId)
+                        return (
+                          <div key={cardId}
+                            onClick={() => toggleAttach(cardId)}
+                            className={`relative flex items-start gap-3 px-5 py-3 border-b border-border/30 cursor-pointer transition-colors ${checked ? 'bg-accent/5' : 'hover:bg-white/[0.025]'}`}>
+                            {/* Work/Process badge — top right */}
+                            {(() => {
+                              const cardType = getCardType(c)
+                              return (
+                                <span className={`absolute top-2 right-4 text-[9px] font-semibold px-1.5 py-0.5 rounded-full
+                                  ${cardType === 'Process' ? 'bg-purple-500/15 text-purple-300' : 'bg-indigo-500/15 text-indigo-300'}`}>
+                                  {cardType}
+                                </span>
+                              )
+                            })()}
+                            <div className="mt-0.5 shrink-0">
+                              <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${checked ? 'bg-accent border-accent' : 'border-border'}`}>
+                                {checked && <Check size={10} className="text-white" />}
+                              </div>
+                            </div>
+                            <div className="flex-1 min-w-0 pr-12">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {mc && <span className="text-[10px] font-mono font-semibold text-indigo-300 bg-indigo-500/10 px-1.5 py-0.5 rounded">{mc}</span>}
+                                <span className="text-xs text-text-primary truncate">{c.name}</span>
+                                {isDone && <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400">Done</span>}
+                              </div>
+                              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                <span className="text-[10px] text-text-muted/60 bg-white/5 px-1.5 py-0.5 rounded truncate max-w-[160px]">{extractList(c)}</span>
+                                {status && !isDone && (
+                                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded"
+                                    style={{ background: (STATUS_COLOR[status] || '#6b7280') + '22', color: STATUS_COLOR[status] || '#6b7280' }}>
+                                    {status}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           )}
 
