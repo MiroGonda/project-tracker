@@ -2016,6 +2016,16 @@ function progressColor(pct) {
   return '#e8e8e8'
 }
 
+// Fractional weight per card status for incremental progress
+const STATUS_WEIGHT = {
+  'Pending':      0.00,
+  'Ongoing':      0.20,
+  'For Review':   0.50,
+  'Revising':     0.60,
+  'For Approval': 0.85,
+  'Done':         1.00,
+}
+
 function computeRequestProgress(req, cards, doneCards, targets = []) {
   const ids = req.attachedCardIds
   if (!ids?.length) return null
@@ -2030,11 +2040,15 @@ function computeRequestProgress(req, cards, doneCards, targets = []) {
   const processCards = allAttached.filter(c => getCardType(c) === 'Process')
   const srcCards     = processCards.length ? processCards : allAttached
 
-  // Count how many of srcCards are done
+  // Compute incremental progress per card based on its lane status
   const doneIds = new Set(attachedDone.map(c => c.id || c.cardId))
-  let doneCount = 0
+  let weightedSum = 0
+  let doneCount   = 0
   for (const c of srcCards) {
-    if (doneIds.has(c.id || c.cardId) || LANE_MAP[extractList(c)]?.status === 'Done') doneCount++
+    const isDone = doneIds.has(c.id || c.cardId) || LANE_MAP[extractList(c)]?.status === 'Done'
+    if (isDone) { weightedSum += 1; doneCount++; continue }
+    const status = LANE_MAP[extractList(c)]?.status
+    weightedSum += STATUS_WEIGHT[status] ?? 0
   }
 
   // Find target value for the period that covers req.date
@@ -2052,7 +2066,7 @@ function computeRequestProgress(req, cards, doneCards, targets = []) {
   const denominator = targetVal ?? srcCards.length
   if (!denominator) return null
   return {
-    pct:      Math.min(100, Math.round(doneCount / denominator * 100)),
+    pct:      Math.min(100, Math.round(weightedSum / denominator * 100)),
     done:     doneCount,
     total:    denominator,
     vsTarget: targetVal != null,
@@ -2158,7 +2172,7 @@ function ReqTargetsPanel({ targets, setTargets, boardId, onClose }) {
 
 function RequestVolumeSection({ requests, boardId }) {
   const [period,  setPeriod]  = useState('monthly')
-  const [view,    setView]    = useState('chart')
+  const [view,    setView]    = useState('table')
   const [showTgt, setShowTgt] = useState(false)
   const [targets, setTargets] = useState(() => {
     const raw = localStorage.getItem(`req_targets_${boardId}`)
@@ -2494,12 +2508,17 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
     })
   }, [allCards])
 
-  // Cards filtered for the attach panel
+  // Cards filtered for the attach panel — Process cards first, then Work
   const attachableCards = useMemo(() => {
     let pool = excludeDone ? activeCards : allCards
     if (mcCardFilter) pool = pool.filter(c => extractMcNumber(c.name) === mcCardFilter)
     const q = cardSearch.trim().toLowerCase()
     if (q) pool = pool.filter(c => (c.name || '').toLowerCase().includes(q))
+    pool = [...pool].sort((a, b) => {
+      const aP = getCardType(a) === 'Process' ? 0 : 1
+      const bP = getCardType(b) === 'Process' ? 0 : 1
+      return aP - bP
+    })
     return pool.slice(0, 80)
   }, [allCards, activeCards, cardSearch, excludeDone, mcCardFilter])
 
@@ -2596,20 +2615,23 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
                         </span>
                       </td>
                       <td className="py-3 px-3" onClick={e => e.stopPropagation()}>
-                        <select
-                          value={reqStatus}
-                          onChange={e => {
-                            e.stopPropagation()
-                            onSaveRequest({ ...r, status: e.target.value })
-                          }}
-                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border-0 outline-none cursor-pointer appearance-none
-                            ${reqStatus === 'closed'  ? 'bg-emerald-500/15 text-emerald-400' :
-                              reqStatus === 'on-hold' ? 'bg-red-500/15 text-red-400' :
-                                                        'bg-blue-500/15 text-blue-400'}`}>
-                          <option value="open">Open</option>
-                          <option value="on-hold">On Hold</option>
-                          <option value="closed">Closed</option>
-                        </select>
+                        <span className="inline-flex items-center relative">
+                          <select
+                            value={reqStatus}
+                            onChange={e => {
+                              e.stopPropagation()
+                              onSaveRequest({ ...r, status: e.target.value })
+                            }}
+                            className={`text-[10px] font-semibold pl-2 pr-4 py-0.5 rounded-full border-0 outline-none cursor-pointer appearance-none
+                              ${reqStatus === 'closed'  ? 'bg-emerald-500/15 text-emerald-400' :
+                                reqStatus === 'on-hold' ? 'bg-red-500/15 text-red-400' :
+                                                          'bg-blue-500/15 text-blue-400'}`}>
+                            <option value="open">Open</option>
+                            <option value="on-hold">On Hold</option>
+                            <option value="closed">Closed</option>
+                          </select>
+                          <ChevronDown size={8} className="absolute right-1 pointer-events-none opacity-50" />
+                        </span>
                       </td>
                       <td className="py-3 px-3 text-xs text-text-muted whitespace-nowrap">{fmtFiled(r.date)}</td>
                       <td className="py-3 px-3 min-w-0">
@@ -2686,18 +2708,21 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
             </span>
             {isNew && <span className="text-[10px] text-amber-400 border border-amber-500/30 rounded px-1.5 py-0.5">New</span>}
             {/* Status dropdown */}
-            <select
-              value={editing.status || 'open'}
-              onChange={e => { e.stopPropagation(); setEditing(prev => ({ ...prev, status: e.target.value })) }}
-              onClick={e => e.stopPropagation()}
-              className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border-0 outline-none cursor-pointer appearance-none
-                ${(editing.status || 'open') === 'closed'  ? 'bg-emerald-500/15 text-emerald-400' :
-                  (editing.status || 'open') === 'on-hold' ? 'bg-red-500/15 text-red-400' :
-                                                             'bg-blue-500/15 text-blue-400'}`}>
-              <option value="open">Open</option>
-              <option value="on-hold">On Hold</option>
-              <option value="closed">Closed</option>
-            </select>
+            <span className="inline-flex items-center relative">
+              <select
+                value={editing.status || 'open'}
+                onChange={e => { e.stopPropagation(); setEditing(prev => ({ ...prev, status: e.target.value })) }}
+                onClick={e => e.stopPropagation()}
+                className={`text-[10px] font-semibold pl-2 pr-4 py-0.5 rounded-full border-0 outline-none cursor-pointer appearance-none
+                  ${(editing.status || 'open') === 'closed'  ? 'bg-emerald-500/15 text-emerald-400' :
+                    (editing.status || 'open') === 'on-hold' ? 'bg-red-500/15 text-red-400' :
+                                                               'bg-blue-500/15 text-blue-400'}`}>
+                <option value="open">Open</option>
+                <option value="on-hold">On Hold</option>
+                <option value="closed">Closed</option>
+              </select>
+              <ChevronDown size={8} className="absolute right-1 pointer-events-none opacity-50" />
+            </span>
             <div className="flex-1" />
             <button onClick={() => setEditing(null)} className="text-text-muted hover:text-text-primary transition-colors"><X size={14} /></button>
           </div>
