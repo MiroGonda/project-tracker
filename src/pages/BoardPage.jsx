@@ -3121,7 +3121,7 @@ const PH_HOLIDAYS = {
 
 // ─── Timeline Tab ─────────────────────────────────────────────────────────────
 
-function TimelineTab({ boardId, cards, loading, requests }) {
+function TimelineTab({ boardId, cards, loading, requests, boardCfg }) {
   const today_d  = new Date()
   const [calYear,  setCalYear]  = useState(today_d.getFullYear())
   const [calMonth, setCalMonth] = useState(today_d.getMonth())
@@ -3230,12 +3230,122 @@ function TimelineTab({ boardId, cards, loading, requests }) {
 
   const todayPct = Math.min(100, Math.max(0, (Math.ceil((today_d - ganttStart) / 86400000) / ganttTotalDays) * 100))
 
+  // ── Project Duration breakdown ──
+  const duration = useMemo(() => {
+    if (!boardCfg?.startDate || !boardCfg?.endDate) return null
+    const start = new Date(boardCfg.startDate + 'T00:00:00')
+    const end   = new Date(boardCfg.endDate   + 'T00:00:00')
+    const now   = new Date(); now.setHours(0, 0, 0, 0)
+    if (end <= start) return null
+
+    // Count business days between two dates (excludes weekends + PH holidays)
+    function bizDays(from, to) {
+      let count = 0
+      const d = new Date(from)
+      while (d < to) {
+        const dow = d.getDay()
+        const iso = d.toISOString().split('T')[0]
+        if (dow !== 0 && dow !== 6 && !PH_HOLIDAYS[iso]) count++
+        d.setDate(d.getDate() + 1)
+      }
+      return count
+    }
+
+    const totalCal    = Math.ceil((end - start) / 86400000)
+    const totalBiz    = bizDays(start, end)
+    const elapsedCal  = Math.max(0, Math.ceil((Math.min(now, end) - start) / 86400000))
+    const elapsedBiz  = now >= end ? totalBiz : now <= start ? 0 : bizDays(start, now)
+    const remainCal   = Math.max(0, Math.ceil((end - Math.max(now, start)) / 86400000))
+    const remainBiz   = Math.max(0, totalBiz - elapsedBiz)
+    const remainWeeks = Math.floor(remainCal / 7)
+    const remainExtra = remainCal % 7
+    const pct         = totalCal > 0 ? Math.min(100, Math.round((elapsedCal / totalCal) * 100)) : 0
+    const isOverdue   = now > end
+
+    return { start, end, totalCal, totalBiz, elapsedCal, elapsedBiz, remainCal, remainBiz, remainWeeks, remainExtra, pct, isOverdue }
+  }, [boardCfg])
+
   if (loading) {
     return <div className="flex items-center justify-center gap-2 mt-10 text-text-muted text-sm"><Spinner size={16} /> Loading…</div>
   }
 
+  const fmtD = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+
   return (
     <div className="p-6 space-y-6">
+
+      {/* ── Project Duration ── */}
+      {duration && (
+        <div className="bg-surface border border-border rounded-xl overflow-hidden">
+          <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-text-primary">Project Duration</h3>
+            <span className="text-xs text-text-muted">{fmtD(duration.start)} — {fmtD(duration.end)}</span>
+          </div>
+          <div className="p-5 space-y-5">
+            {/* Progress bar */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className={`text-2xl font-bold tabular-nums ${duration.isOverdue ? 'text-red-400' : 'text-accent'}`}>
+                  {duration.pct}%
+                </span>
+                <span className="text-xs text-text-muted">
+                  {duration.isOverdue
+                    ? <span className="text-red-400 font-medium">Overdue</span>
+                    : `${duration.elapsedCal} of ${duration.totalCal} days elapsed`
+                  }
+                </span>
+              </div>
+              <div className="h-3 w-full bg-white/5 rounded-full overflow-hidden relative">
+                <div className={`h-full rounded-full transition-all ${duration.isOverdue ? 'bg-red-500' : 'bg-accent'}`}
+                  style={{ width: `${duration.pct}%` }} />
+              </div>
+              <div className="flex justify-between mt-1.5 text-[10px] text-text-muted/60">
+                <span>{fmtD(duration.start)}</span>
+                <span>{fmtD(duration.end)}</span>
+              </div>
+            </div>
+
+            {/* Stat cards */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="bg-bg rounded-lg border border-border/50 p-3">
+                <span className="text-[10px] uppercase tracking-wider text-text-muted/60 font-medium block mb-1">Days Remaining</span>
+                <span className={`text-xl font-bold tabular-nums ${duration.isOverdue ? 'text-red-400' : 'text-text-primary'}`}>
+                  {duration.isOverdue ? 0 : duration.remainCal}
+                </span>
+                <span className="text-[11px] text-text-muted block mt-0.5">
+                  of {duration.totalCal} total
+                </span>
+              </div>
+              <div className="bg-bg rounded-lg border border-border/50 p-3">
+                <span className="text-[10px] uppercase tracking-wider text-text-muted/60 font-medium block mb-1">Weeks Remaining</span>
+                <span className={`text-xl font-bold tabular-nums ${duration.isOverdue ? 'text-red-400' : 'text-text-primary'}`}>
+                  {duration.isOverdue ? 0 : duration.remainWeeks}
+                  {!duration.isOverdue && duration.remainExtra > 0 && <span className="text-sm font-medium text-text-muted ml-0.5">+{duration.remainExtra}d</span>}
+                </span>
+              </div>
+              <div className="bg-bg rounded-lg border border-border/50 p-3">
+                <span className="text-[10px] uppercase tracking-wider text-text-muted/60 font-medium block mb-1">Business Days Left</span>
+                <span className={`text-xl font-bold tabular-nums ${duration.isOverdue ? 'text-red-400' : 'text-cyan-400'}`}>
+                  {duration.isOverdue ? 0 : duration.remainBiz}
+                </span>
+                <span className="text-[11px] text-text-muted block mt-0.5">
+                  of {duration.totalBiz} total · {duration.elapsedBiz} elapsed
+                </span>
+              </div>
+              <div className="bg-bg rounded-lg border border-border/50 p-3">
+                <span className="text-[10px] uppercase tracking-wider text-text-muted/60 font-medium block mb-1">Elapsed</span>
+                <span className="text-xl font-bold tabular-nums text-text-primary">
+                  {duration.elapsedCal}<span className="text-sm font-medium text-text-muted ml-0.5">d</span>
+                </span>
+                <span className="text-[11px] text-text-muted block mt-0.5">
+                  {duration.elapsedBiz} business days
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Calendar ── */}
       <div className="bg-surface border border-border rounded-xl overflow-hidden">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
@@ -4372,7 +4482,7 @@ export default function BoardPage() {
 
       {/* ── Timeline tab ── */}
       {activeTab === 'timeline' && (
-        <TimelineTab boardId={boardId} cards={cards} loading={loading} requests={requests} />
+        <TimelineTab boardId={boardId} cards={cards} loading={loading} requests={requests} boardCfg={config?.boards?.[boardId]} />
       )}
 
 
