@@ -10,7 +10,7 @@ import {
   Circle, CheckCircle2, Calendar, Search, Minimize2, Settings2, Layers,
   Inbox, GanttChart, CalendarDays, ChevronLeft, ChevronRight,
   Plus, Link2, Eye, FileText, ImagePlus, Users,
-  BarChart2, Table2, LayoutList, Pencil, ClipboardCopy,
+  BarChart2, Table2, LayoutList, Pencil, ClipboardCopy, Trash2, Columns3, Type as TypeIcon,
 } from 'lucide-react'
 import { boardCards, boardMovements, boardSummary, cycleTime } from '../api/phobos'
 import { subscribeRequests, saveRequest, deleteRequest, migrateLocalRequests } from '../api/requests'
@@ -2350,7 +2350,194 @@ function RequestVolumeSection({ requests, boardId }) {
   )
 }
 
-function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSaveRequest, onDeleteRequest, passMap, slaDays }) {
+// ─── Custom column cell — renders an editable control by column type ────────
+
+function CustomFieldCell({ column, request, onSaveRequest }) {
+  const value = request.customFields?.[column.id]
+  const save = (v) => {
+    const cf = { ...(request.customFields || {}) }
+    if (v == null || v === '') delete cf[column.id]
+    else                       cf[column.id] = v
+    onSaveRequest({ ...request, customFields: cf })
+  }
+
+  if (column.type === 'checkbox') {
+    const checked = !!value
+    return (
+      <button
+        onClick={() => save(!checked)}
+        className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${checked ? 'bg-accent border-accent' : 'border-border hover:border-accent/50'}`}
+      >
+        {checked && <Check size={10} className="text-white" />}
+      </button>
+    )
+  }
+
+  if (column.type === 'date') {
+    return (
+      <input
+        type="date"
+        className="bg-transparent text-xs text-text-primary outline-none border-none p-0 w-full hover:text-text-primary focus:text-text-primary"
+        value={value || ''}
+        onChange={e => save(e.target.value)}
+      />
+    )
+  }
+
+  if (column.type === 'select') {
+    const options = column.options || []
+    return (
+      <span className="inline-flex items-center relative">
+        <select
+          value={value || ''}
+          onChange={e => save(e.target.value)}
+          className="text-xs bg-transparent text-text-primary border-0 outline-none cursor-pointer appearance-none pr-4 py-0"
+        >
+          <option value="">—</option>
+          {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+        </select>
+        <ChevronDown size={8} className="absolute right-0 pointer-events-none opacity-40" />
+      </span>
+    )
+  }
+
+  // text (default)
+  return (
+    <input
+      key={`${request.id}-${column.id}`}
+      type="text"
+      defaultValue={value || ''}
+      onBlur={e => { if (e.target.value !== (value || '')) save(e.target.value) }}
+      placeholder="—"
+      className="bg-transparent text-xs text-text-primary outline-none border-none p-0 w-full placeholder:text-text-muted/25"
+    />
+  )
+}
+
+// ─── Custom Columns manager modal ────────────────────────────────────────────
+
+function CustomColumnsModal({ columns, onChange, onClose }) {
+  const [local, setLocal] = useState(columns)
+
+  function updateCol(id, patch) {
+    setLocal(prev => prev.map(c => c.id === id ? { ...c, ...patch } : c))
+  }
+  function addCol() {
+    setLocal(prev => [...prev, { id: `col_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, name: '', type: 'text' }])
+  }
+  function removeCol(id) {
+    setLocal(prev => prev.filter(c => c.id !== id))
+  }
+  function addOption(id, opt) {
+    const val = (opt || '').trim()
+    if (!val) return
+    setLocal(prev => prev.map(c => c.id === id ? { ...c, options: [...(c.options || []), val].filter((v, i, a) => a.indexOf(v) === i) } : c))
+  }
+  function removeOption(id, opt) {
+    setLocal(prev => prev.map(c => c.id === id ? { ...c, options: (c.options || []).filter(o => o !== opt) } : c))
+  }
+
+  function save() {
+    // Strip empty-name columns before saving
+    const clean = local.filter(c => (c.name || '').trim())
+                      .map(c => ({ ...c, name: c.name.trim(), ...(c.type === 'select' ? { options: c.options || [] } : {}) }))
+    onChange(clean)
+    onClose()
+  }
+
+  const COL_TYPES = [
+    { value: 'text',     label: 'Text',     Icon: TypeIcon },
+    { value: 'date',     label: 'Date',     Icon: Calendar },
+    { value: 'checkbox', label: 'Checkbox', Icon: Check },
+    { value: 'select',   label: 'Dropdown', Icon: LayoutList },
+  ]
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="bg-surface border border-border rounded-xl w-[620px] max-h-[90vh] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+          <div>
+            <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2"><Columns3 size={13} className="text-accent" /> Custom Columns</h3>
+            <p className="text-[11px] text-text-muted mt-0.5">Add columns specific to this board. Shared across all users.</p>
+          </div>
+          <button onClick={onClose} className="text-text-muted hover:text-text-primary transition-colors"><X size={16} /></button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-3">
+          {local.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-10 gap-2 text-text-muted">
+              <Columns3 size={28} className="text-text-muted/20" />
+              <p className="text-xs">No custom columns yet.</p>
+            </div>
+          )}
+          {local.map(col => (
+            <div key={col.id} className="rounded-lg border border-border bg-bg/40 p-3 space-y-2.5">
+              <div className="flex items-center gap-2">
+                <input
+                  className="input text-sm flex-1"
+                  value={col.name}
+                  onChange={e => updateCol(col.id, { name: e.target.value })}
+                  placeholder="Column name…"
+                />
+                <select
+                  value={col.type}
+                  onChange={e => updateCol(col.id, { type: e.target.value })}
+                  className="input text-xs w-32 cursor-pointer"
+                >
+                  {COL_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+                <button onClick={() => removeCol(col.id)}
+                  className="p-2 text-text-muted hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors" title="Delete column">
+                  <Trash2 size={13} />
+                </button>
+              </div>
+              {col.type === 'select' && (
+                <div className="pl-1">
+                  <p className="text-[10px] uppercase tracking-wider text-text-muted/60 font-medium mb-1.5">Options</p>
+                  <div className="flex flex-wrap gap-1.5 mb-1.5">
+                    {(col.options || []).length === 0 && <span className="text-[11px] text-text-muted/60 italic">No options yet.</span>}
+                    {(col.options || []).map(opt => (
+                      <span key={opt} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+                        {opt}
+                        <button onClick={() => removeOption(col.id, opt)} className="hover:text-red-400 transition-colors"><X size={9} /></button>
+                      </span>
+                    ))}
+                  </div>
+                  <input
+                    className="input text-xs w-full"
+                    placeholder="Type an option and press Enter…"
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && e.target.value.trim()) {
+                        addOption(col.id, e.target.value)
+                        e.target.value = ''
+                        e.preventDefault()
+                      }
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          ))}
+
+          <button onClick={addCol}
+            className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-lg border border-dashed border-border text-xs text-text-muted hover:text-accent hover:border-accent/40 hover:bg-accent/5 transition-colors">
+            <Plus size={12} /> Add Column
+          </button>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border shrink-0">
+          <button onClick={onClose} className="btn-secondary text-xs">Cancel</button>
+          <button onClick={save} className="btn-primary text-xs">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSaveRequest, onDeleteRequest, passMap, slaDays, customColumns = [], canManageColumns = false, onUpdateColumns }) {
   const activeCards   = cards     || []
   const allCards      = useMemo(() => [...activeCards, ...(doneCards || [])], [activeCards, doneCards])
 
@@ -2392,6 +2579,7 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
   const [cardSearch,    setCardSearch]    = useState('')
   const [excludeDone,   setExcludeDone]   = useState(true)
   const [opsCopied,     setOpsCopied]     = useState(false)
+  const [columnsOpen,   setColumnsOpen]   = useState(false)
   const [mcCardFilter,  setMcCardFilter]  = useState('')
   const [mcDropOpen,    setMcDropOpen]    = useState(false)
   const [cardTabMode,   setCardTabMode]   = useState('view') // 'view' = read-only summary, 'edit' = attach/detach
@@ -2593,9 +2781,19 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-bg/60 backdrop-blur shrink-0">
           <span className="text-xs text-text-muted">{requests.length} request{requests.length !== 1 ? 's' : ''}</span>
-          <button onClick={openNew} className="btn-primary text-xs flex items-center gap-1.5">
-            <Plus size={12} /> New Request
-          </button>
+          <div className="flex items-center gap-2">
+            {canManageColumns && (
+              <button onClick={() => setColumnsOpen(true)}
+                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-border text-text-muted hover:text-text-primary hover:bg-white/5 transition-colors"
+                title="Manage custom columns">
+                <Columns3 size={11} /> Columns
+                {customColumns.length > 0 && <span className="text-[10px] text-text-muted/60">({customColumns.length})</span>}
+              </button>
+            )}
+            <button onClick={openNew} className="btn-primary text-xs flex items-center gap-1.5">
+              <Plus size={12} /> New Request
+            </button>
+          </div>
         </div>
 
         {requests.length === 0 ? (
@@ -2624,6 +2822,17 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
                   {passMap && <th className="text-left py-2.5 px-3 w-20">1st Pass</th>}
                   {passMap && <th className="text-left py-2.5 px-3 w-20">2nd Pass</th>}
                   {passMap && <th className="text-left py-2.5 px-3 w-20">3rd Pass</th>}
+                  {customColumns.map(col => (
+                    <th key={col.id} className="text-left py-2.5 px-3 min-w-[120px]">
+                      <span className="flex items-center gap-1">
+                        {col.type === 'text'     && <TypeIcon size={9} className="text-text-muted/50" />}
+                        {col.type === 'date'     && <Calendar size={9} className="text-text-muted/50" />}
+                        {col.type === 'checkbox' && <Check    size={9} className="text-text-muted/50" />}
+                        {col.type === 'select'   && <LayoutList size={9} className="text-text-muted/50" />}
+                        {col.name}
+                      </span>
+                    </th>
+                  ))}
                   <th className="py-2.5 px-3 w-8" />
                 </tr>
               </thead>
@@ -2747,6 +2956,11 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
                           )
                         })
                       })()}
+                      {customColumns.map(col => (
+                        <td key={col.id} className="py-3 px-3" onClick={e => e.stopPropagation()}>
+                          <CustomFieldCell column={col} request={r} onSaveRequest={onSaveRequest} />
+                        </td>
+                      ))}
                       <td className="py-3 px-3" onClick={e => { e.stopPropagation(); handleDelete(r.id) }}>
                         <button className="opacity-0 group-hover:opacity-100 text-text-muted/50 hover:text-red-400 transition-all p-1 rounded hover:bg-red-500/10">
                           <X size={12} />
@@ -2762,6 +2976,13 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
       </div>
 
       {/* ── Right: edit panel ── */}
+      {columnsOpen && (
+        <CustomColumnsModal
+          columns={customColumns}
+          onChange={onUpdateColumns}
+          onClose={() => setColumnsOpen(false)}
+        />
+      )}
       {editing && (
         <div className="w-[560px] shrink-0 border-l border-border bg-surface flex flex-col overflow-hidden">
           {/* Panel header */}
@@ -2859,6 +3080,47 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
                   </div>
                 )
               })()}
+
+              {/* Custom columns */}
+              {customColumns.length > 0 && (
+                <div className="pt-2 border-t border-border/40 space-y-3">
+                  {customColumns.map(col => {
+                    const value = editing.customFields?.[col.id]
+                    const setValue = (v) => setEditing(prev => {
+                      const cf = { ...(prev.customFields || {}) }
+                      if (v == null || v === '') delete cf[col.id]
+                      else                       cf[col.id] = v
+                      return { ...prev, customFields: cf }
+                    })
+                    return (
+                      <div key={col.id}>
+                        <label className="block text-[10px] uppercase tracking-wider text-text-muted mb-1.5 font-medium">{col.name}</label>
+                        {col.type === 'text' && (
+                          <input type="text" className="input w-full text-sm" value={value || ''} onChange={e => setValue(e.target.value)} placeholder="—" />
+                        )}
+                        {col.type === 'date' && (
+                          <input type="date" className="input w-full text-sm" value={value || ''} onChange={e => setValue(e.target.value)} />
+                        )}
+                        {col.type === 'checkbox' && (
+                          <button onClick={() => setValue(!value)}
+                            className={`flex items-center gap-2 text-xs text-text-muted hover:text-text-primary transition-colors`}>
+                            <span className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${value ? 'bg-accent border-accent' : 'border-border'}`}>
+                              {value && <Check size={10} className="text-white" />}
+                            </span>
+                            {value ? 'Checked' : 'Unchecked'}
+                          </button>
+                        )}
+                        {col.type === 'select' && (
+                          <select value={value || ''} onChange={e => setValue(e.target.value)} className="input w-full text-sm cursor-pointer">
+                            <option value="">— Select —</option>
+                            {(col.options || []).map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                          </select>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
 
               {/* Brief */}
               <div>
@@ -3573,7 +3835,7 @@ function TimelineTab({ boardId, cards, loading, requests, boardCfg }) {
 
 export default function BoardPage() {
   const { boardId }                                              = useParams()
-  const { admin, accessibleIds, config, loading: accessLoading, getBoardRole, email } = useAccess()
+  const { admin, accessibleIds, config, updateConfig, loading: accessLoading, getBoardRole, email } = useAccess()
   const { toasts, toast, dismiss }                               = useToast()
 
   // Board source — drives which data path (Phobos/Ares vs. direct Trello) we use
@@ -4533,6 +4795,14 @@ export default function BoardPage() {
           onSaveRequest={handleSaveRequest} onDeleteRequest={handleDeleteRequest}
           passMap={passTracking?.enabled ? passMap : null}
           slaDays={boardCfg.slaDays}
+          customColumns={boardCfg.customColumns || []}
+          canManageColumns={admin || getBoardRole(boardId) === 'frost'}
+          onUpdateColumns={(cols) => {
+            if (!config) return
+            const boards = { ...config.boards }
+            boards[boardId] = { ...boards[boardId], customColumns: cols }
+            updateConfig({ ...config, boards })
+          }}
         />
       )}
 
