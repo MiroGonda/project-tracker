@@ -2350,7 +2350,7 @@ function RequestVolumeSection({ requests, boardId }) {
   )
 }
 
-function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSaveRequest, onDeleteRequest, passMap }) {
+function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSaveRequest, onDeleteRequest, passMap, slaDays }) {
   const activeCards   = cards     || []
   const allCards      = useMemo(() => [...activeCards, ...(doneCards || [])], [activeCards, doneCards])
 
@@ -2369,6 +2369,19 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
       if (!min || d < min) min = d
     }
     return min
+  }
+
+  // SLA-based color for a pass date: as days since the pass approach slaDays, the cell turns red.
+  function passCellColor(dateStr) {
+    if (!slaDays || !dateStr) return null
+    const d = new Date(dateStr.split('T')[0] + 'T00:00:00')
+    const now = new Date(); now.setHours(0, 0, 0, 0)
+    const daysSince = Math.max(0, Math.floor((now - d) / 86400000))
+    const ratio = daysSince / slaDays
+    if (ratio >= 1)   return { bg: 'bg-red-500/20',    text: 'text-red-300' }
+    if (ratio >= 0.75) return { bg: 'bg-orange-500/15', text: 'text-orange-300' }
+    if (ratio >= 0.5)  return { bg: 'bg-amber-500/10',  text: 'text-amber-300' }
+    return null
   }
 
   const [editing,       setEditing]       = useState(null)
@@ -2706,9 +2719,14 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
                       </td>
                       {passMap && ['first', 'second', 'third'].map(pk => {
                         const d = getRequestPassDate(r, pk)
+                        const color = d ? passCellColor(d) : null
                         return (
-                          <td key={pk} className="py-3 px-3 text-xs text-text-muted whitespace-nowrap">
-                            {d ? fmtFiled(d.split('T')[0]) : <span className="text-text-muted/25">—</span>}
+                          <td key={pk} className="py-3 px-3 text-xs whitespace-nowrap">
+                            {d ? (
+                              <span className={`px-1.5 py-0.5 rounded font-medium ${color ? `${color.bg} ${color.text}` : 'text-text-muted'}`}>
+                                {fmtFiled(d.split('T')[0])}
+                              </span>
+                            ) : <span className="text-text-muted/25">—</span>}
                           </td>
                         )
                       })}
@@ -4497,6 +4515,7 @@ export default function BoardPage() {
           requests={requests} requestsLoading={requestsLoading}
           onSaveRequest={handleSaveRequest} onDeleteRequest={handleDeleteRequest}
           passMap={passTracking?.enabled ? passMap : null}
+          slaDays={boardCfg.slaDays}
         />
       )}
 

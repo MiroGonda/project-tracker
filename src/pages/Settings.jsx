@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Sun, Moon, CheckCircle2, Circle, Eye, EyeOff, Layers, X, Settings as SettingsIcon, Plus, UserX, Calendar, Clock, Link2 } from 'lucide-react'
+import { Sun, Moon, CheckCircle2, Circle, Eye, EyeOff, Layers, X, Settings as SettingsIcon, Plus, UserX, Calendar, Clock } from 'lucide-react'
 import { useTheme } from '../context/ThemeContext'
 import { useAccess } from '../context/AccessContext'
 import {
@@ -8,7 +8,7 @@ import {
   connectGoogle,
   disconnectGoogle,
 } from '../api/google'
-import { listBoards, listRaintoolProjects } from '../api/phobos'
+import { listBoards } from '../api/phobos'
 import { fetchBoardCustomFields, createCustomField } from '../api/trello'
 import { saveUserPrefs } from '../api/userPrefs'
 import Toast from '../components/Toast'
@@ -42,56 +42,7 @@ function Divider() {
   return <div className="border-t border-border my-6" />
 }
 
-// ─── Project picker ───────────────────────────────────────────────────────────
-
-function ProjectPicker({ projects, loading, error, selected, onSelect, onClear, clearLabel }) {
-  const [search, setSearch] = useState('')
-  const filtered = projects.filter(p => p.name.toLowerCase().includes(search.toLowerCase()))
-  return (
-    <div className="flex flex-col gap-2">
-      {selected ? (
-        <div className="flex items-center justify-between px-3 py-2 rounded-lg border border-border bg-white/[0.03] text-xs">
-          <span className="text-text-primary font-medium truncate">{selected.name}</span>
-          <button onClick={onClear} className="ml-2 text-text-muted hover:text-text-primary transition-colors shrink-0">
-            <X size={12} />
-          </button>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-1.5">
-          <input
-            className="input text-xs"
-            placeholder="Search…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-          <div className="flex flex-col gap-0.5 overflow-y-auto max-h-40">
-            {loading && <div className="flex items-center gap-2 py-3 text-text-muted text-xs"><Spinner size={12} /> Loading…</div>}
-            {error   && <p className="text-xs text-red-400 px-1 py-1">{error}</p>}
-            {!loading && !error && (
-              <>
-                <button onClick={onClear}
-                  className="w-full text-left px-2 py-1.5 rounded text-xs text-text-muted hover:bg-white/5 transition-colors">
-                  {clearLabel}
-                </button>
-                {filtered.length === 0 && search && (
-                  <p className="text-xs text-text-muted/50 px-2 py-1">No matches.</p>
-                )}
-                {filtered.map(p => (
-                  <button key={p.id} onClick={() => onSelect(p)}
-                    className="w-full text-left px-2 py-1.5 rounded text-xs text-text-muted hover:bg-white/5 hover:text-text-primary transition-colors">
-                    {p.name}
-                  </button>
-                ))}
-              </>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── Per-board integrations modal ─────────────────────────────────────────────
+// ─── Per-board configuration modal ────────────────────────────────────────────
 
 function ConfigSection({ icon: Icon, title, description, accent = 'text-text-muted', children }) {
   return (
@@ -112,27 +63,6 @@ function BoardConfigModal({
 }) {
   const boardCfg = config?.boards?.[board.id] || {}
   const passEnabled = !!passConfig[board.id]?.enabled
-
-  // Raintool project state
-  const [rtProject, setRtProject] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(`rt_project_${board.id}`) || 'null') } catch { return null }
-  })
-  const [rtProjects, setRtProjects] = useState([])
-  const [rtLoading,  setRtLoading]  = useState(true)
-  const [rtError,    setRtError]    = useState(null)
-
-  useEffect(() => {
-    listRaintoolProjects()
-      .then(setRtProjects)
-      .catch(e => setRtError(e.message))
-      .finally(() => setRtLoading(false))
-  }, [])
-
-  function selectRt(p) {
-    setRtProject(p)
-    if (p) localStorage.setItem(`rt_project_${board.id}`, JSON.stringify(p))
-    else   localStorage.removeItem(`rt_project_${board.id}`)
-  }
 
   function setBoardField(field, value) {
     if (!config) return
@@ -256,20 +186,6 @@ function BoardConfigModal({
               </div>
             </ConfigSection>
           )}
-
-          {/* ── Integrations: Raintool ── */}
-          <ConfigSection
-            icon={Link2}
-            title="Integrations"
-            description="Raintool project — source for Dashboard cycle time data."
-            accent="text-indigo-400"
-          >
-            <ProjectPicker
-              projects={rtProjects} loading={rtLoading} error={rtError}
-              selected={rtProject} onSelect={selectRt} onClear={() => selectRt(null)}
-              clearLabel="— No project selected"
-            />
-          </ConfigSection>
 
           {/* ── External Users (admin + frost) ── */}
           {(admin || isFrost) && config && (
@@ -529,10 +445,8 @@ export default function Settings() {
                 const bcfg        = config?.boards?.[b.id] || {}
                 const hasDates    = !!(bcfg.startDate || bcfg.endDate)
                 const hasSla      = bcfg.slaDays != null
-                const rtProj      = (() => { try { return JSON.parse(localStorage.getItem(`rt_project_${b.id}`) || 'null') } catch { return null } })()
-                const hasIntegrations = !!rtProj
                 const isFrost = !admin && getBoardRole(b.id) === 'frost'
-                const hasAny = hasDates || hasSla || passEnabled || hasIntegrations
+                const hasAny = hasDates || hasSla || passEnabled
                 return (
                   <div key={b.id} className={`rounded-lg border transition-colors ${hidden ? 'border-border/50 opacity-50' : 'border-border bg-white/[0.02] hover:bg-white/[0.03]'}`}>
                     <div className="flex items-center justify-between px-3 py-2.5">
@@ -542,7 +456,6 @@ export default function Settings() {
                           {hasDates       && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 flex items-center gap-1"><Calendar size={8} /> Dates</span>}
                           {hasSla         && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 flex items-center gap-1"><Clock size={8} /> SLA {bcfg.slaDays}d</span>}
                           {passEnabled    && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center gap-1"><Layers size={8} /> Passes</span>}
-                          {hasIntegrations && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 flex items-center gap-1"><Link2 size={8} /> Raintool</span>}
                           {hidden         && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-white/5 text-text-muted">Hidden</span>}
                           {!hasAny && !hidden && <span className="text-[9px] text-text-muted/40 italic">Not configured</span>}
                         </div>
