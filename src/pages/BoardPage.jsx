@@ -2804,9 +2804,26 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
             <button onClick={openNew} className="btn-secondary text-xs mt-1 flex items-center gap-1"><Plus size={11} /> Add first request</button>
           </div>
         ) : (
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-auto">
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-bg/95 backdrop-blur z-10">
+                {/* Group labels row — only visible when Passes or Custom groups exist */}
+                {(passMap || customColumns.length > 0) && (
+                  <tr className="text-[9px] uppercase tracking-widest font-semibold">
+                    <th colSpan={9} className="py-1.5 px-3 text-text-muted/30 text-left">Request</th>
+                    {passMap && (
+                      <th colSpan={3} className="py-1.5 px-3 text-cyan-400/70 bg-cyan-500/5 border-l border-cyan-500/20">
+                        <span className="flex items-center gap-1"><Layers size={9} /> Passes</span>
+                      </th>
+                    )}
+                    {customColumns.length > 0 && (
+                      <th colSpan={customColumns.length} className="py-1.5 px-3 text-accent/70 bg-accent/5 border-l border-accent/20">
+                        <span className="flex items-center gap-1"><Columns3 size={9} /> Custom</span>
+                      </th>
+                    )}
+                    <th className="py-1.5" />
+                  </tr>
+                )}
                 <tr className="text-[10px] uppercase tracking-wider text-text-muted border-b border-border">
                   <SortTh colKey="item" sortKey={reqSort.key} sortDir={reqSort.dir} onSort={toggleSort} className="w-10 text-center">
                     <span className="mx-auto">#</span>
@@ -2814,21 +2831,21 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
                   <SortTh colKey="mc"   sortKey={reqSort.key} sortDir={reqSort.dir} onSort={toggleSort} className="w-20">MC</SortTh>
                   <th className="text-left py-2.5 px-3 w-24">Status</th>
                   <SortTh colKey="date" sortKey={reqSort.key} sortDir={reqSort.dir} onSort={toggleSort} className="w-20">Filed</SortTh>
-                  <SortTh colKey="name" sortKey={reqSort.key} sortDir={reqSort.dir} onSort={toggleSort} className="min-w-[260px]">Name / Brief</SortTh>
+                  <SortTh colKey="name" sortKey={reqSort.key} sortDir={reqSort.dir} onSort={toggleSort} className="min-w-[260px] w-full">Name / Brief</SortTh>
                   <th className="text-left py-2.5 px-3 w-28">Stage</th>
                   <th className="text-left py-2.5 px-3 w-36">Progress</th>
                   <SortTh colKey="deadline" sortKey={reqSort.key} sortDir={reqSort.dir} onSort={toggleSort} className="w-24">Deadline</SortTh>
                   <SortTh colKey="spoc"     sortKey={reqSort.key} sortDir={reqSort.dir} onSort={toggleSort} className="w-28">SPOC</SortTh>
-                  {passMap && <th className="text-left py-2.5 px-3 w-20">1st Pass</th>}
-                  {passMap && <th className="text-left py-2.5 px-3 w-20">2nd Pass</th>}
-                  {passMap && <th className="text-left py-2.5 px-3 w-20">3rd Pass</th>}
-                  {customColumns.map(col => (
-                    <th key={col.id} className="text-left py-2.5 px-3 min-w-[120px]">
+                  {passMap && <th className="text-left py-2.5 px-3 w-20 bg-cyan-500/5 border-l border-cyan-500/20">1st Pass</th>}
+                  {passMap && <th className="text-left py-2.5 px-3 w-20 bg-cyan-500/5">2nd Pass</th>}
+                  {passMap && <th className="text-left py-2.5 px-3 w-20 bg-cyan-500/5">3rd Pass</th>}
+                  {customColumns.map((col, i) => (
+                    <th key={col.id} className={`text-left py-2.5 px-3 min-w-[140px] bg-accent/5 ${i === 0 ? 'border-l border-accent/20' : ''}`}>
                       <span className="flex items-center gap-1">
-                        {col.type === 'text'     && <TypeIcon size={9} className="text-text-muted/50" />}
-                        {col.type === 'date'     && <Calendar size={9} className="text-text-muted/50" />}
-                        {col.type === 'checkbox' && <Check    size={9} className="text-text-muted/50" />}
-                        {col.type === 'select'   && <LayoutList size={9} className="text-text-muted/50" />}
+                        {col.type === 'text'     && <TypeIcon size={9} className="text-accent/60" />}
+                        {col.type === 'date'     && <Calendar size={9} className="text-accent/60" />}
+                        {col.type === 'checkbox' && <Check    size={9} className="text-accent/60" />}
+                        {col.type === 'select'   && <LayoutList size={9} className="text-accent/60" />}
                         {col.name}
                       </span>
                     </th>
@@ -2938,8 +2955,9 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
                         const isOpen = (r.status || 'open') === 'open'
                         return passKeys.map((pk, i) => {
                           const d = passDates[i]
+                          const leftBorder = i === 0 ? 'border-l border-cyan-500/10' : ''
                           if (!d) return (
-                            <td key={pk} className="py-3 px-3 text-xs whitespace-nowrap">
+                            <td key={pk} className={`py-3 px-3 text-xs whitespace-nowrap ${leftBorder}`}>
                               <span className="text-text-muted/25">—</span>
                             </td>
                           )
@@ -2950,14 +2968,17 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
                             ? (passTextColor(d) || 'text-text-muted')
                             : 'text-text-muted'
                           return (
-                            <td key={pk} className="py-3 px-3 whitespace-nowrap">
+                            <td key={pk} className={`py-3 px-3 whitespace-nowrap ${leftBorder}`}>
                               <span className={`text-xs font-medium ${cls}`}>{fmtFiled(d.split('T')[0])}</span>
                             </td>
                           )
                         })
                       })()}
-                      {customColumns.map(col => (
-                        <td key={col.id} className="py-3 px-3" onClick={e => e.stopPropagation()}>
+                      {customColumns.map((col, i) => (
+                        <td key={col.id}
+                          className={`py-3 px-3 ${i === 0 ? 'border-l border-accent/10' : ''}`}
+                          onClick={e => e.stopPropagation()}
+                        >
                           <CustomFieldCell column={col} request={r} onSaveRequest={onSaveRequest} />
                         </td>
                       ))}
