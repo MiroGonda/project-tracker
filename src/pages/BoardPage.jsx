@@ -2173,9 +2173,18 @@ function ReqTargetsPanel({ targets, setTargets, boardId, onClose }) {
 
 // ─── Request Volume Section ───────────────────────────────────────────────────
 
-function RequestVolumeSection({ requests, boardId }) {
+function KpiTile({ label, value, color = 'text-text-primary', highlight = false }) {
+  return (
+    <div className={`rounded-lg border px-3 py-2 ${highlight ? 'bg-white/[0.03] border-border' : 'bg-bg/40 border-border/60'}`}>
+      <div className={`text-xl font-bold tabular-nums leading-none ${color}`}>{value}</div>
+      <div className="text-[10px] uppercase tracking-wider text-text-muted/60 mt-1">{label}</div>
+    </div>
+  )
+}
+
+function RequestVolumeSection({ requests, boardId, cards = [], doneCards = [], passMap, slaDays }) {
   const [period,  setPeriod]  = useState('monthly')
-  const [view,    setView]    = useState('table')
+  const [view,    setView]    = useState('summary')
   const [showTgt, setShowTgt] = useState(false)
   const [targets, setTargets] = useState(() => {
     const raw = localStorage.getItem(`req_targets_${boardId}`)
@@ -2223,6 +2232,75 @@ function RequestVolumeSection({ requests, boardId }) {
   const closedCount = requests.filter(r => r.status === 'closed').length
   const hasTargets  = targets.length > 0
 
+  // ── Dashboard metrics (open requests only) ──────────────────────────────────
+  const dash = useMemo(() => {
+    const openReqs = requests.filter(r => !r.status || r.status === 'open')
+    const todayMid = new Date(today())
+
+    // Overdue: open requests past their deadline
+    const overdue = openReqs.filter(r => r.deadline && new Date(r.deadline + 'T00:00:00') < todayMid).length
+
+    // Unassigned: open requests with no cards attached
+    const unassigned = openReqs.filter(r => !r.attachedCardIds?.length).length
+
+    // Stage breakdown: Ongoing / For Review / Revising / For Approval / Done / Unassigned
+    const STAGES = ['Ongoing', 'For Review', 'Revising', 'For Approval', 'Done']
+    const stageCounts = Object.fromEntries(STAGES.map(s => [s, 0]))
+    let noStage = 0
+    for (const r of openReqs) {
+      const stage = computeCardStage(r, cards, doneCards)
+      if (stage && stageCounts[stage] != null) stageCounts[stage]++
+      else noStage++
+    }
+
+    // Average progress across open requests with cards attached
+    let progSum = 0, progCount = 0
+    for (const r of openReqs) {
+      const p = computeRequestProgress(r, cards, doneCards)
+      if (p) { progSum += p.pct; progCount++ }
+    }
+    const avgProgress = progCount ? Math.round(progSum / progCount) : null
+
+    // Pass pipeline (if pass tracking enabled)
+    // For each open request: determine which pass it's "waiting on" based on earliest dates
+    let passPipeline = null
+    if (passMap) {
+      const buckets = { waitingP1: 0, waitingP2: 0, waitingP3: 0, complete: 0 }
+      const slaBuckets = { healthy: 0, amber: 0, orange: 0, red: 0 }
+      for (const r of openReqs) {
+        if (!r.attachedCardIds?.length) continue
+        // Earliest pass date across attached cards for each pass key
+        const minPass = (k) => {
+          let min = null
+          for (const cid of r.attachedCardIds) {
+            const p = passMap.get(cid)?.[k]
+            if (p && (!min || p < min)) min = p
+          }
+          return min
+        }
+        const p1 = minPass('first'), p2 = minPass('second'), p3 = minPass('third')
+        let latest = null
+        if (p3)      { buckets.complete++;  latest = p3 }
+        else if (p2) { buckets.waitingP3++; latest = p2 }
+        else if (p1) { buckets.waitingP2++; latest = p1 }
+        else         { buckets.waitingP1++ }
+
+        if (slaDays && latest) {
+          const d = new Date(latest.split('T')[0] + 'T00:00:00')
+          const daysSince = Math.max(0, Math.floor((todayMid - d) / 86400000))
+          const ratio = daysSince / slaDays
+          if (ratio >= 1)    slaBuckets.red++
+          else if (ratio >= 0.75) slaBuckets.orange++
+          else if (ratio >= 0.5)  slaBuckets.amber++
+          else slaBuckets.healthy++
+        }
+      }
+      passPipeline = { buckets, slaBuckets }
+    }
+
+    return { openTotal: openReqs.length, overdue, unassigned, stageCounts, noStage, avgProgress, passPipeline }
+  }, [requests, cards, doneCards, passMap, slaDays])
+
   return (
     <SectionCard
       slim
@@ -2230,37 +2308,38 @@ function RequestVolumeSection({ requests, boardId }) {
       className="shrink-0 mx-6 mt-4 mb-3"
       headerRight={
         <div className="flex items-center gap-1.5">
-          {/* Summary pills */}
-          <div className="flex items-center gap-3 text-[10px] mr-1">
-            <span className="text-text-muted"><span className="font-semibold text-text-primary">{totalReqs}</span> total</span>
-            <span className="text-text-muted"><span className="font-semibold text-blue-400">{openCount}</span> open</span>
-            {holdCount > 0 && <span className="text-text-muted"><span className="font-semibold text-orange-400">{holdCount}</span> on hold</span>}
-            <span className="text-text-muted"><span className="font-semibold text-emerald-400">{closedCount}</span> closed</span>
-          </div>
-          {/* Period toggle */}
-          <div className="flex border border-border rounded-lg overflow-hidden text-xs">
-            {[['weekly', 'Week'], ['monthly', 'Month']].map(([p, lbl]) => (
-              <button key={p} onClick={() => setPeriod(p)}
-                className={`px-2 py-0.5 transition-colors ${period === p ? 'bg-accent/20 text-accent' : 'text-text-muted hover:bg-white/5'}`}>
-                {lbl}
-              </button>
-            ))}
-          </div>
+          {/* Period toggle — only meaningful for chart/table */}
+          {view !== 'summary' && (
+            <div className="flex border border-border rounded-lg overflow-hidden text-xs">
+              {[['weekly', 'Week'], ['monthly', 'Month']].map(([p, lbl]) => (
+                <button key={p} onClick={() => setPeriod(p)}
+                  className={`px-2 py-0.5 transition-colors ${period === p ? 'bg-accent/20 text-accent' : 'text-text-muted hover:bg-white/5'}`}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+          )}
           {/* Targets icon button */}
-          <button
-            ref={tgtBtnRef}
-            onClick={() => setShowTgt(v => !v)}
-            title={hasTargets ? `Targets (${targets.length})` : 'Targets'}
-            className={`p-1 rounded-lg border transition-colors ${
-              hasTargets || showTgt
-                ? 'border-amber-500/30 text-amber-400 bg-amber-500/10'
-                : 'border-border text-text-muted hover:bg-white/5'
-            }`}
-          >
-            <Target size={13} />
-          </button>
-          {/* Chart / Table toggle */}
+          {view !== 'summary' && (
+            <button
+              ref={tgtBtnRef}
+              onClick={() => setShowTgt(v => !v)}
+              title={hasTargets ? `Targets (${targets.length})` : 'Targets'}
+              className={`p-1 rounded-lg border transition-colors ${
+                hasTargets || showTgt
+                  ? 'border-amber-500/30 text-amber-400 bg-amber-500/10'
+                  : 'border-border text-text-muted hover:bg-white/5'
+              }`}
+            >
+              <Target size={13} />
+            </button>
+          )}
+          {/* Summary / Chart / Table toggle */}
           <div className="flex border border-border rounded-lg overflow-hidden">
+            <button onClick={() => setView('summary')} title="Summary"
+              className={`p-1 transition-colors ${view === 'summary' ? 'bg-accent/20 text-accent' : 'text-text-muted hover:bg-white/5'}`}>
+              <LayoutDashboard size={13} />
+            </button>
             <button onClick={() => setView('chart')} title="Chart"
               className={`p-1 transition-colors ${view === 'chart' ? 'bg-accent/20 text-accent' : 'text-text-muted hover:bg-white/5'}`}>
               <BarChart2 size={13} />
@@ -2273,8 +2352,153 @@ function RequestVolumeSection({ requests, boardId }) {
         </div>
       }
     >
-      {data.length === 0 ? (
+      {totalReqs === 0 ? (
         <p className="text-xs text-text-muted/40 text-center py-6">No requests filed yet — add a request to see it plotted here.</p>
+      ) : view === 'summary' ? (
+        <div className="space-y-3">
+          {/* ── KPI strip ── */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+            <KpiTile label="Total"      value={totalReqs}       color="text-text-primary" />
+            <KpiTile label="Open"       value={openCount}       color="text-blue-400" />
+            <KpiTile label="On Hold"    value={holdCount}       color="text-orange-400" />
+            <KpiTile label="Closed"     value={closedCount}     color="text-emerald-400" />
+            <KpiTile label="Overdue"    value={dash.overdue}    color={dash.overdue    ? 'text-red-400'   : 'text-text-muted/50'} highlight={dash.overdue > 0} />
+            <KpiTile label="Unassigned" value={dash.unassigned} color={dash.unassigned ? 'text-amber-400' : 'text-text-muted/50'} highlight={dash.unassigned > 0} />
+          </div>
+
+          {/* ── Two-column body: Stage breakdown + Pass pipeline (or progress) ── */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+
+            {/* Stage breakdown */}
+            <div className="rounded-lg border border-border bg-bg/40 p-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] uppercase tracking-wider text-text-muted font-medium">Stage Breakdown</span>
+                <span className="text-[10px] text-text-muted/50">{dash.openTotal} open</span>
+              </div>
+              {dash.openTotal === 0 ? (
+                <p className="text-[11px] text-text-muted/40 italic py-4 text-center">No open requests.</p>
+              ) : (() => {
+                const totalForBar = dash.openTotal
+                const stageList = [
+                  ['Ongoing',      dash.stageCounts['Ongoing']],
+                  ['For Review',   dash.stageCounts['For Review']],
+                  ['Revising',     dash.stageCounts['Revising']],
+                  ['For Approval', dash.stageCounts['For Approval']],
+                  ['Done',         dash.stageCounts['Done']],
+                ]
+                return (
+                  <>
+                    {/* Stacked horizontal bar */}
+                    <div className="flex h-2 rounded-full overflow-hidden bg-white/[0.04] mb-2.5">
+                      {stageList.map(([name, count]) => count > 0 && (
+                        <div key={name} style={{ flex: count, background: STATUS_COLOR[name] }} title={`${name}: ${count}`} />
+                      ))}
+                      {dash.noStage > 0 && <div style={{ flex: dash.noStage, background: '#4b5563' }} title={`Unassigned: ${dash.noStage}`} />}
+                    </div>
+                    {/* Legend rows */}
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                      {stageList.map(([name, count]) => (
+                        <div key={name} className="flex items-center gap-1.5 text-[11px]">
+                          <span className="w-1.5 h-1.5 rounded-sm shrink-0" style={{ background: STATUS_COLOR[name] }} />
+                          <span className="text-text-muted flex-1 truncate">{name}</span>
+                          <span className={`font-semibold tabular-nums ${count > 0 ? 'text-text-primary' : 'text-text-muted/30'}`}>{count}</span>
+                        </div>
+                      ))}
+                      {dash.noStage > 0 && (
+                        <div className="flex items-center gap-1.5 text-[11px]">
+                          <span className="w-1.5 h-1.5 rounded-sm shrink-0 bg-gray-600" />
+                          <span className="text-text-muted flex-1 truncate">Unassigned</span>
+                          <span className="font-semibold tabular-nums text-amber-400">{dash.noStage}</span>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )
+              })()}
+            </div>
+
+            {/* Pass pipeline OR Overall progress (fallback) */}
+            {dash.passPipeline ? (
+              <div className="rounded-lg border border-border bg-bg/40 p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] uppercase tracking-wider text-text-muted font-medium flex items-center gap-1">
+                    <Layers size={10} className="text-cyan-400" /> Pass Pipeline
+                  </span>
+                  {dash.avgProgress != null && (
+                    <span className="text-[10px] text-text-muted/60">avg <span className="text-text-primary font-semibold">{dash.avgProgress}%</span></span>
+                  )}
+                </div>
+                {/* Waiting counts */}
+                <div className="grid grid-cols-4 gap-2 mb-2.5">
+                  {[
+                    ['Awaiting 1st', dash.passPipeline.buckets.waitingP1, 'text-text-muted'],
+                    ['Awaiting 2nd', dash.passPipeline.buckets.waitingP2, 'text-cyan-400'],
+                    ['Awaiting 3rd', dash.passPipeline.buckets.waitingP3, 'text-cyan-400'],
+                    ['Complete',     dash.passPipeline.buckets.complete,  'text-emerald-400'],
+                  ].map(([label, count, color]) => (
+                    <div key={label} className="text-center py-1.5 rounded-md bg-white/[0.03]">
+                      <div className={`text-base font-bold tabular-nums ${count > 0 ? color : 'text-text-muted/30'}`}>{count}</div>
+                      <div className="text-[9px] uppercase tracking-wider text-text-muted/60 mt-0.5">{label}</div>
+                    </div>
+                  ))}
+                </div>
+                {/* SLA health — only when SLA is set and there are items still pending */}
+                {slaDays ? (() => {
+                  const { healthy, amber, orange, red } = dash.passPipeline.slaBuckets
+                  const pending = healthy + amber + orange + red
+                  return pending > 0 ? (
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] uppercase tracking-wider text-text-muted/60 font-medium">SLA Health</span>
+                        <span className="text-[10px] text-text-muted/50">{slaDays}d target</span>
+                      </div>
+                      <div className="flex h-1.5 rounded-full overflow-hidden bg-white/[0.04] mb-1.5">
+                        {healthy > 0 && <div style={{ flex: healthy }} className="bg-emerald-500" title={`Healthy: ${healthy}`} />}
+                        {amber   > 0 && <div style={{ flex: amber   }} className="bg-amber-500"   title={`Amber: ${amber}`} />}
+                        {orange  > 0 && <div style={{ flex: orange  }} className="bg-orange-500"  title={`Orange: ${orange}`} />}
+                        {red     > 0 && <div style={{ flex: red     }} className="bg-red-500"     title={`SLA breached: ${red}`} />}
+                      </div>
+                      <div className="flex items-center gap-3 text-[10px] text-text-muted">
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-sm bg-emerald-500" /><span className="tabular-nums font-semibold text-emerald-400">{healthy}</span> healthy</span>
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-sm bg-amber-500" /><span className="tabular-nums font-semibold text-amber-400">{amber}</span> amber</span>
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-sm bg-orange-500" /><span className="tabular-nums font-semibold text-orange-400">{orange}</span> orange</span>
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-sm bg-red-500" /><span className="tabular-nums font-semibold text-red-400">{red}</span> breached</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-text-muted/40 italic text-center py-1">No pending passes to track.</p>
+                  )
+                })() : (
+                  <p className="text-[10px] text-text-muted/40 italic">Set an SLA in board configuration to see health indicators.</p>
+                )}
+              </div>
+            ) : (
+              /* Progress panel (shown when pass tracking is off) */
+              <div className="rounded-lg border border-border bg-bg/40 p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] uppercase tracking-wider text-text-muted font-medium">Overall Progress</span>
+                  <span className="text-[10px] text-text-muted/50">{dash.openTotal} open</span>
+                </div>
+                {dash.avgProgress != null ? (
+                  <>
+                    <div className="flex items-baseline gap-2 mb-2">
+                      <span className="text-2xl font-bold tabular-nums text-text-primary">{dash.avgProgress}%</span>
+                      <span className="text-[11px] text-text-muted">avg across open requests</span>
+                    </div>
+                    <div className="h-2 w-full bg-white/[0.04] rounded-full overflow-hidden">
+                      <div className="h-full rounded-full transition-all"
+                        style={{ width: `${dash.avgProgress}%`, background: progressColor(dash.avgProgress) }} />
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-[11px] text-text-muted/40 italic text-center py-4">No progress data — attach cards to open requests.</p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : data.length === 0 ? (
+        <p className="text-xs text-text-muted/40 text-center py-6">No requests with a filed date in the selected period.</p>
       ) : view === 'chart' ? (
         <>
           <div className="relative h-[200px]">
@@ -2772,7 +2996,11 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
     <div className="flex flex-col h-[calc(100vh-130px)]" onKeyDown={handlePanelKey}>
 
       {/* ── Request Volume chart / table ── */}
-      <RequestVolumeSection requests={requests} boardId={boardId} />
+      <RequestVolumeSection
+        requests={requests} boardId={boardId}
+        cards={activeCards} doneCards={doneCards}
+        passMap={passMap} slaDays={slaDays}
+      />
 
       {/* ── Request list + edit panel ── */}
       <div className="flex flex-1 min-h-0 border-t border-border">
