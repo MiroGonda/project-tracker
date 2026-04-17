@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Sun, Moon, CheckCircle2, Circle, Eye, EyeOff, Layers, X, Settings as SettingsIcon, Plus, UserX, Calendar } from 'lucide-react'
+import { Sun, Moon, CheckCircle2, Circle, Eye, EyeOff, Layers, X, Settings as SettingsIcon, Plus, UserX, Calendar, Clock, Link2 } from 'lucide-react'
 import { useTheme } from '../context/ThemeContext'
 import { useAccess } from '../context/AccessContext'
 import {
@@ -93,7 +93,27 @@ function ProjectPicker({ projects, loading, error, selected, onSelect, onClear, 
 
 // ─── Per-board integrations modal ─────────────────────────────────────────────
 
-function BoardIntegrationsModal({ board, onClose }) {
+function ConfigSection({ icon: Icon, title, description, accent = 'text-text-muted', children }) {
+  return (
+    <div className="rounded-lg border border-border bg-bg/40 p-4">
+      <div className="flex items-center gap-2 mb-1">
+        <Icon size={13} className={accent} />
+        <h4 className="text-xs font-semibold text-text-primary">{title}</h4>
+      </div>
+      {description && <p className="text-[11px] text-text-muted mb-3">{description}</p>}
+      <div className={description ? '' : 'mt-2'}>{children}</div>
+    </div>
+  )
+}
+
+function BoardConfigModal({
+  board, admin, isFrost, config, updateConfig, onClose,
+  passConfig, canEnablePass, passLoading, onSetupPassTracking, onDisablePassTracking,
+}) {
+  const boardCfg = config?.boards?.[board.id] || {}
+  const passEnabled = !!passConfig[board.id]?.enabled
+
+  // Raintool project state
   const [rtProject, setRtProject] = useState(() => {
     try { return JSON.parse(localStorage.getItem(`rt_project_${board.id}`) || 'null') } catch { return null }
   })
@@ -114,30 +134,159 @@ function BoardIntegrationsModal({ board, onClose }) {
     else   localStorage.removeItem(`rt_project_${board.id}`)
   }
 
+  function setBoardField(field, value) {
+    if (!config) return
+    const boards = { ...config.boards }
+    boards[board.id] = { ...boards[board.id], [field]: value }
+    updateConfig({ ...config, boards })
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div
-        className="bg-surface border border-border rounded-xl p-5 w-[460px] flex flex-col gap-5 shadow-2xl max-h-[80vh] overflow-y-auto"
+        className="bg-surface border border-border rounded-xl w-[560px] max-h-[90vh] flex flex-col shadow-2xl"
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-semibold text-text-primary">Integrations</h3>
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+          <div className="min-w-0 pr-4">
+            <h3 className="text-sm font-semibold text-text-primary">Board Configuration</h3>
             <p className="text-[11px] text-text-muted mt-0.5 truncate">{board.name || board.id}</p>
           </div>
-          <button onClick={onClose} className="text-text-muted hover:text-text-primary transition-colors ml-4 shrink-0">
+          <button onClick={onClose} className="text-text-muted hover:text-text-primary transition-colors shrink-0">
             <X size={16} />
           </button>
         </div>
 
-        <div className="flex flex-col gap-2">
-          <p className="text-xs font-medium text-text-primary">Raintool Project</p>
-          <p className="text-[11px] text-text-muted">Source for Dashboard cycle time data.</p>
-          <ProjectPicker
-            projects={rtProjects} loading={rtLoading} error={rtError}
-            selected={rtProject} onSelect={selectRt} onClear={() => selectRt(null)}
-            clearLabel="— No project selected"
-          />
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-3">
+
+          {/* ── Project Dates ── */}
+          {admin && (
+            <ConfigSection
+              icon={Calendar}
+              title="Project Dates"
+              description="Used to compute duration, remaining days, and progress in the Timeline tab."
+              accent="text-cyan-400"
+            >
+              <div className="flex items-center gap-3 flex-wrap">
+                <label className="flex items-center gap-1.5 text-[10px] text-text-muted">
+                  Start
+                  <input type="date" className="input text-xs py-1 w-36"
+                    value={boardCfg.startDate || ''}
+                    onChange={e => setBoardField('startDate', e.target.value || null)}
+                  />
+                </label>
+                <label className="flex items-center gap-1.5 text-[10px] text-text-muted">
+                  End
+                  <input type="date" className="input text-xs py-1 w-36"
+                    value={boardCfg.endDate || ''}
+                    onChange={e => setBoardField('endDate', e.target.value || null)}
+                  />
+                </label>
+                {(boardCfg.startDate || boardCfg.endDate) && (
+                  <button onClick={() => {
+                    if (!config) return
+                    const boards = { ...config.boards }
+                    boards[board.id] = { ...boards[board.id], startDate: null, endDate: null }
+                    updateConfig({ ...config, boards })
+                  }}
+                    className="text-[10px] text-red-400 hover:text-red-300 transition-colors ml-auto">Clear</button>
+                )}
+              </div>
+            </ConfigSection>
+          )}
+
+          {/* ── SLA ── */}
+          {admin && (
+            <ConfigSection
+              icon={Clock}
+              title="SLA"
+              description="Service-level agreement target, in days."
+              accent="text-amber-400"
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  type="number" min="0" step="1"
+                  className="input text-xs py-1 w-24"
+                  value={boardCfg.slaDays ?? ''}
+                  onChange={e => {
+                    const v = e.target.value
+                    setBoardField('slaDays', v === '' ? null : Math.max(0, parseInt(v, 10) || 0))
+                  }}
+                  placeholder="—"
+                />
+                <span className="text-xs text-text-muted">days</span>
+                {boardCfg.slaDays != null && (
+                  <button onClick={() => setBoardField('slaDays', null)}
+                    className="text-[10px] text-red-400 hover:text-red-300 transition-colors ml-auto">Clear</button>
+                )}
+              </div>
+            </ConfigSection>
+          )}
+
+          {/* ── Pass Tracking ── */}
+          {admin && (
+            <ConfigSection
+              icon={Layers}
+              title="Pass Tracking"
+              description="Adds 1st / 2nd / 3rd Pass date fields to every card on this board via Trello."
+              accent={passEnabled ? 'text-emerald-400' : 'text-text-muted'}
+            >
+              <div className="flex items-center gap-2">
+                <button
+                  disabled={passLoading || (!passEnabled && !canEnablePass)}
+                  onClick={() => passEnabled ? onDisablePassTracking(board.id) : onSetupPassTracking(board.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-colors ${
+                    passEnabled
+                      ? 'border-emerald-500/30 text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/10'
+                      : 'border-border text-text-muted hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed'
+                  }`}
+                >
+                  {passLoading
+                    ? 'Setting up…'
+                    : passEnabled
+                      ? <><CheckCircle2 size={11} /> Enabled — click to disable</>
+                      : <>Enable Pass Tracking</>
+                  }
+                </button>
+                {!passEnabled && !canEnablePass && (
+                  <span className="text-[10px] text-text-muted/70 italic">Trello credentials missing</span>
+                )}
+              </div>
+            </ConfigSection>
+          )}
+
+          {/* ── Integrations: Raintool ── */}
+          <ConfigSection
+            icon={Link2}
+            title="Integrations"
+            description="Raintool project — source for Dashboard cycle time data."
+            accent="text-indigo-400"
+          >
+            <ProjectPicker
+              projects={rtProjects} loading={rtLoading} error={rtError}
+              selected={rtProject} onSelect={selectRt} onClear={() => selectRt(null)}
+              clearLabel="— No project selected"
+            />
+          </ConfigSection>
+
+          {/* ── External Users (admin + frost) ── */}
+          {(admin || isFrost) && config && (
+            <ConfigSection
+              icon={UserX}
+              title="External User Invitations"
+              description="Grant view-only access to people outside Frost (e.g. clients)."
+              accent="text-amber-400"
+            >
+              <ExternalUserManager boardId={board.id} config={config} updateConfig={updateConfig} flat />
+            </ConfigSection>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border shrink-0">
+          <button onClick={onClose} className="btn-secondary text-xs">Done</button>
         </div>
       </div>
     </div>
@@ -146,7 +295,7 @@ function BoardIntegrationsModal({ board, onClose }) {
 
 // ─── External User management (for Frost Users) ───────────────────────────────
 
-function ExternalUserManager({ boardId, config, updateConfig }) {
+function ExternalUserManager({ boardId, config, updateConfig, flat = false }) {
   const [val, setVal] = useState('')
   const board = config?.boards?.[boardId]
   const extUsers = board?.externalUsers ?? []
@@ -181,11 +330,13 @@ function ExternalUserManager({ boardId, config, updateConfig }) {
   }
 
   return (
-    <div className="mt-3 pt-3 border-t border-border/50">
-      <p className="text-[10px] font-medium text-amber-400 flex items-center gap-1 mb-2">
-        <UserX size={10} /> External Users
-        <span className="text-text-muted font-normal ml-1">— board access only</span>
-      </p>
+    <div className={flat ? '' : 'mt-3 pt-3 border-t border-border/50'}>
+      {!flat && (
+        <p className="text-[10px] font-medium text-amber-400 flex items-center gap-1 mb-2">
+          <UserX size={10} /> External Users
+          <span className="text-text-muted font-normal ml-1">— board access only</span>
+        </p>
+      )}
       <div className="flex flex-wrap gap-1.5 mb-2">
         {extUsers.length === 0
           ? <p className="text-xs text-text-muted italic">None assigned.</p>
@@ -218,10 +369,8 @@ export default function Settings() {
   const [googleEmail,     setGoogleEmail]     = useState(getGoogleEmail)
   const [googleLoading,   setGoogleLoading]   = useState(false)
 
-  // Per-board integrations modal
-  const [integrationsFor, setIntegrationsFor] = useState(null)
-  // Board dates expand
-  const [datesFor, setDatesFor] = useState(null)
+  // Per-board configuration modal
+  const [configFor, setConfigFor] = useState(null)
 
   // Board visibility
   const [allBoards, setAllBoards] = useState([])
@@ -261,13 +410,6 @@ export default function Settings() {
     || [...accessibleIds].some(id => { const r = getBoardRole(id); return r === 'frost' || r === 'admin' })
 
   // toggleBoardHidden and hiddenIds are provided by AccessContext
-
-  function handleBoardDate(boardId, field, value) {
-    if (!config) return
-    const boards = { ...config.boards }
-    boards[boardId] = { ...boards[boardId], [field]: value || null }
-    updateConfig({ ...config, boards })
-  }
 
   function handleConnect() {
     setGoogleLoading(true)
@@ -384,125 +526,52 @@ export default function Settings() {
               {configurableBoards.map(b => {
                 const hidden      = hiddenIds.has(b.id)
                 const passEnabled = !!passConfig[b.id]?.enabled
-                const passLoading = passSetupLoading.has(b.id)
-                const canEnablePass = !!(trelloApiKey && trelloToken)
-                const rtProj   = (() => { try { return JSON.parse(localStorage.getItem(`rt_project_${b.id}`) || 'null') } catch { return null } })()
+                const bcfg        = config?.boards?.[b.id] || {}
+                const hasDates    = !!(bcfg.startDate || bcfg.endDate)
+                const hasSla      = bcfg.slaDays != null
+                const rtProj      = (() => { try { return JSON.parse(localStorage.getItem(`rt_project_${b.id}`) || 'null') } catch { return null } })()
                 const hasIntegrations = !!rtProj
                 const isFrost = !admin && getBoardRole(b.id) === 'frost'
+                const hasAny = hasDates || hasSla || passEnabled || hasIntegrations
                 return (
-                  <div key={b.id} className={`rounded-lg border transition-colors ${hidden ? 'border-border/50 opacity-50' : 'border-border bg-white/[0.02]'}`}>
-                    <div className="flex items-center justify-between px-3 py-2">
-                      <div className="flex flex-col min-w-0">
+                  <div key={b.id} className={`rounded-lg border transition-colors ${hidden ? 'border-border/50 opacity-50' : 'border-border bg-white/[0.02] hover:bg-white/[0.03]'}`}>
+                    <div className="flex items-center justify-between px-3 py-2.5">
+                      <div className="flex flex-col min-w-0 flex-1 pr-3">
                         <span className="text-xs font-medium text-text-primary truncate">{b.name || b.id}</span>
-                        {hidden && <span className="text-[10px] text-text-muted">Hidden</span>}
+                        <div className="flex items-center gap-1.5 mt-1">
+                          {hasDates       && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 flex items-center gap-1"><Calendar size={8} /> Dates</span>}
+                          {hasSla         && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 flex items-center gap-1"><Clock size={8} /> SLA {bcfg.slaDays}d</span>}
+                          {passEnabled    && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center gap-1"><Layers size={8} /> Passes</span>}
+                          {hasIntegrations && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 flex items-center gap-1"><Link2 size={8} /> Raintool</span>}
+                          {hidden         && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-white/5 text-text-muted">Hidden</span>}
+                          {!hasAny && !hidden && <span className="text-[9px] text-text-muted/40 italic">Not configured</span>}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1.5 ml-3 shrink-0">
-                        {/* Pass Tracking — admin only (requires Trello credentials) */}
-                        {admin && (
-                          <button
-                            disabled={passLoading || (!passEnabled && !canEnablePass)}
-                            onClick={() => passEnabled ? handleDisablePassTracking(b.id) : handleSetupPassTracking(b.id)}
-                            className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] transition-colors ${
-                              passEnabled
-                                ? 'border-emerald-500/30 text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/10'
-                                : 'border-border text-text-muted hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed'
-                            }`}
-                            title={
-                              passLoading ? 'Setting up…'
-                              : passEnabled ? 'Disable pass tracking'
-                              : canEnablePass ? 'Enable pass tracking'
-                              : 'Trello credentials not found — check Admin backend config'
-                            }
-                          >
-                            <Layers size={10} />
-                            {passLoading ? '…' : 'Passes'}
-                          </button>
-                        )}
-                        {/* Dates */}
-                        {admin && (() => {
-                          const bcfg = config?.boards?.[b.id] || {}
-                          const hasDates = !!(bcfg.startDate || bcfg.endDate)
-                          return (
-                            <button
-                              onClick={() => setDatesFor(prev => prev === b.id ? null : b.id)}
-                              className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] transition-colors ${
-                                hasDates
-                                  ? 'border-cyan-500/30 text-cyan-400 bg-cyan-500/5 hover:bg-cyan-500/10'
-                                  : 'border-border text-text-muted hover:bg-white/5'
-                              }`}
-                              title="Set project start/end dates"
-                            >
-                              <Calendar size={10} />
-                              Dates
-                            </button>
-                          )
-                        })()}
-                        {/* Integrations cog */}
+                      <div className="flex items-center gap-1.5 shrink-0">
                         <button
-                          onClick={() => setIntegrationsFor(b)}
-                          className={`p-1.5 rounded-lg border text-[10px] transition-colors ${
-                            hasIntegrations
-                              ? 'border-indigo-500/30 text-indigo-400 bg-indigo-500/5 hover:bg-indigo-500/10'
-                              : 'border-border text-text-muted hover:bg-white/5'
-                          }`}
-                          title={hasIntegrations ? 'Edit integrations' : 'Configure integrations'}
+                          onClick={() => setConfigFor(b)}
+                          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[11px] text-text-muted hover:text-text-primary hover:bg-white/5 transition-colors"
+                          title="Configure this board"
                         >
                           <SettingsIcon size={11} />
+                          Configure
                         </button>
                         {/* Hide toggle — admin only */}
                         {admin && (
                           <button
                             onClick={() => toggleBoardHidden(b.id)}
-                            className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] transition-colors ${
+                            className={`p-1.5 rounded-lg border transition-colors ${
                               hidden
                                 ? 'border-border text-text-muted hover:bg-white/5'
-                                : 'border-amber-500/30 text-amber-400 hover:bg-amber-500/10'
+                                : 'border-border text-text-muted hover:text-amber-400 hover:border-amber-500/30 hover:bg-amber-500/5'
                             }`}
                             title={hidden ? 'Show in sidebar' : 'Hide from sidebar'}
                           >
-                            {hidden ? <Eye size={10} /> : <EyeOff size={10} />}
-                            {hidden ? 'Show' : 'Hide'}
+                            {hidden ? <Eye size={11} /> : <EyeOff size={11} />}
                           </button>
                         )}
                       </div>
                     </div>
-                    {/* Frost User: External User management */}
-                    {isFrost && config && (
-                      <div className="px-3 pb-3">
-                        <ExternalUserManager boardId={b.id} config={config} updateConfig={updateConfig} />
-                      </div>
-                    )}
-                    {/* Inline date editor */}
-                    {datesFor === b.id && (() => {
-                      const bcfg = config?.boards?.[b.id] || {}
-                      return (
-                        <div className="px-3 pb-3 flex items-center gap-3 border-t border-border/40 pt-2">
-                          <label className="flex items-center gap-1.5 text-[10px] text-text-muted">
-                            Start
-                            <input type="date" className="input text-xs py-1 w-32"
-                              value={bcfg.startDate || ''}
-                              onChange={e => handleBoardDate(b.id, 'startDate', e.target.value)}
-                            />
-                          </label>
-                          <label className="flex items-center gap-1.5 text-[10px] text-text-muted">
-                            End
-                            <input type="date" className="input text-xs py-1 w-32"
-                              value={bcfg.endDate || ''}
-                              onChange={e => handleBoardDate(b.id, 'endDate', e.target.value)}
-                            />
-                          </label>
-                          {(bcfg.startDate || bcfg.endDate) && (
-                            <button onClick={() => {
-                              if (!config) return
-                              const boards = { ...config.boards }
-                              boards[b.id] = { ...boards[b.id], startDate: null, endDate: null }
-                              updateConfig({ ...config, boards })
-                            }}
-                              className="text-[10px] text-red-400 hover:text-red-300 transition-colors ml-auto">Clear</button>
-                          )}
-                        </div>
-                      )
-                    })()}
                   </div>
                 )
               })}
@@ -523,12 +592,25 @@ export default function Settings() {
 
       <Toast toasts={toasts} dismiss={dismiss} />
 
-      {integrationsFor && (
-        <BoardIntegrationsModal
-          board={integrationsFor}
-          onClose={() => setIntegrationsFor(null)}
-        />
-      )}
+      {configFor && (() => {
+        const isFrost = !admin && getBoardRole(configFor.id) === 'frost'
+        const canEnablePass = !!(trelloApiKey && trelloToken)
+        return (
+          <BoardConfigModal
+            board={configFor}
+            admin={admin}
+            isFrost={isFrost}
+            config={config}
+            updateConfig={updateConfig}
+            onClose={() => setConfigFor(null)}
+            passConfig={passConfig}
+            canEnablePass={canEnablePass}
+            passLoading={passSetupLoading.has(configFor.id)}
+            onSetupPassTracking={handleSetupPassTracking}
+            onDisablePassTracking={handleDisablePassTracking}
+          />
+        )
+      })()}
     </div>
   )
 }
