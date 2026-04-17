@@ -2371,16 +2371,16 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
     return min
   }
 
-  // SLA-based color for a pass date: as days since the pass approach slaDays, the cell turns red.
-  function passCellColor(dateStr) {
+  // SLA-based text color for an ageing (latest) pass date: as days since pass approach slaDays, colour trends red.
+  function passTextColor(dateStr) {
     if (!slaDays || !dateStr) return null
     const d = new Date(dateStr.split('T')[0] + 'T00:00:00')
     const now = new Date(); now.setHours(0, 0, 0, 0)
     const daysSince = Math.max(0, Math.floor((now - d) / 86400000))
     const ratio = daysSince / slaDays
-    if (ratio >= 1)   return { bg: 'bg-red-500/20',    text: 'text-red-300' }
-    if (ratio >= 0.75) return { bg: 'bg-orange-500/15', text: 'text-orange-300' }
-    if (ratio >= 0.5)  return { bg: 'bg-amber-500/10',  text: 'text-amber-300' }
+    if (ratio >= 1)    return 'text-red-400'
+    if (ratio >= 0.75) return 'text-orange-400'
+    if (ratio >= 0.5)  return 'text-amber-400'
     return null
   }
 
@@ -2717,19 +2717,37 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
                           {r.spoc || <span className="text-text-muted/25">—</span>}
                         </span>
                       </td>
-                      {passMap && ['first', 'second', 'third'].map(pk => {
-                        const d = getRequestPassDate(r, pk)
-                        const color = d ? passCellColor(d) : null
-                        return (
-                          <td key={pk} className="py-3 px-3 text-xs whitespace-nowrap">
-                            {d ? (
-                              <span className={`px-1.5 py-0.5 rounded font-medium ${color ? `${color.bg} ${color.text}` : 'text-text-muted'}`}>
-                                {fmtFiled(d.split('T')[0])}
-                              </span>
-                            ) : <span className="text-text-muted/25">—</span>}
-                          </td>
-                        )
-                      })}
+                      {passMap && (() => {
+                        const passKeys = ['first', 'second', 'third']
+                        const passDates = passKeys.map(pk => getRequestPassDate(r, pk))
+                        // Index of the latest filled pass; earlier ones are "fulfilled"
+                        let latestIdx = -1
+                        for (let i = passDates.length - 1; i >= 0; i--) {
+                          if (passDates[i]) { latestIdx = i; break }
+                        }
+                        const isOpen = (r.status || 'open') === 'open'
+                        return passKeys.map((pk, i) => {
+                          const d = passDates[i]
+                          if (!d) return (
+                            <td key={pk} className="py-3 px-3 text-xs whitespace-nowrap">
+                              <span className="text-text-muted/25">—</span>
+                            </td>
+                          )
+                          // Earlier passes → fulfilled → green (only meaningful if status is open)
+                          // Latest pass → SLA-graded color (only if open)
+                          // Otherwise → muted
+                          const cls = isOpen
+                            ? (i < latestIdx
+                                ? 'text-emerald-400'
+                                : (passTextColor(d) || 'text-text-muted'))
+                            : 'text-text-muted'
+                          return (
+                            <td key={pk} className="py-3 px-3 whitespace-nowrap">
+                              <span className={`text-xs font-medium ${cls}`}>{fmtFiled(d.split('T')[0])}</span>
+                            </td>
+                          )
+                        })
+                      })()}
                       <td className="py-3 px-3" onClick={e => { e.stopPropagation(); handleDelete(r.id) }}>
                         <button className="opacity-0 group-hover:opacity-100 text-text-muted/50 hover:text-red-400 transition-all p-1 rounded hover:bg-red-500/10">
                           <X size={12} />
