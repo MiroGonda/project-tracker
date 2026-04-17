@@ -2906,13 +2906,10 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
                         )}
                       </td>
                       {/* Stage */}
-                      <td className="py-3 px-3">
-                        {stage ? (
-                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded"
-                            style={{ background: (STATUS_COLOR[stage] || '#6b7280') + '22', color: STATUS_COLOR[stage] || '#6b7280' }}>
-                            {stage}
-                          </span>
-                        ) : <span className="text-text-muted/25 text-[10px]">—</span>}
+                      <td className="py-3 px-3 whitespace-nowrap">
+                        {stage
+                          ? <span className="text-xs font-medium" style={{ color: STATUS_COLOR[stage] || '#6b7280' }}>{stage}</span>
+                          : <span className="text-text-muted/25 text-xs">—</span>}
                       </td>
                       {/* Progress */}
                       <td className="py-3 px-3">
