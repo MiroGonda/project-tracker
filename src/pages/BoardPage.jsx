@@ -2371,7 +2371,8 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
     return min
   }
 
-  // SLA-based text color for an ageing (latest) pass date: as days since pass approach slaDays, colour trends red.
+  // SLA-based text color for the latest (ongoing) pass date.
+  // Healthy → green, ageing → amber → orange → red.
   function passTextColor(dateStr) {
     if (!slaDays || !dateStr) return null
     const d = new Date(dateStr.split('T')[0] + 'T00:00:00')
@@ -2381,7 +2382,7 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
     if (ratio >= 1)    return 'text-red-400'
     if (ratio >= 0.75) return 'text-orange-400'
     if (ratio >= 0.5)  return 'text-amber-400'
-    return null
+    return 'text-emerald-400'
   }
 
   const [editing,       setEditing]       = useState(null)
@@ -2733,13 +2734,11 @@ function RequestTab({ boardId, cards, doneCards, requests, requestsLoading, onSa
                               <span className="text-text-muted/25">—</span>
                             </td>
                           )
-                          // Earlier passes → fulfilled → green (only meaningful if status is open)
-                          // Latest pass → SLA-graded color (only if open)
-                          // Otherwise → muted
-                          const cls = isOpen
-                            ? (i < latestIdx
-                                ? 'text-emerald-400'
-                                : (passTextColor(d) || 'text-text-muted'))
+                          // Earlier (fulfilled) passes → muted grey
+                          // Latest pass → SLA-graded color (green → amber → orange → red) when open
+                          // Closed / on-hold → muted grey for all
+                          const cls = isOpen && i === latestIdx
+                            ? (passTextColor(d) || 'text-text-muted')
                             : 'text-text-muted'
                           return (
                             <td key={pk} className="py-3 px-3 whitespace-nowrap">
