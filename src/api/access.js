@@ -66,7 +66,7 @@ export function getUserBoardRole(config, email, boardId) {
   return null
 }
 
-/** Admin or frost users can configure board integrations (Raintool). */
+/** Admin or frost users can configure per-board settings (dates, SLA, passes, etc.). */
 export function canConfigureBoard(config, email, boardId) {
   const role = getUserBoardRole(config, email, boardId)
   return role === 'admin' || role === 'frost'

@@ -2,6 +2,9 @@
 
 Primary briefing for any agent operating on this repository. Read this end-to-end before making changes. The project has evolved significantly from its original "Ares Dashboard" form — parts of the file tree, package name, and legacy references still say "ares-dashboard" for historical reasons, but the product is now **Phobos Requests Tracker**.
 
+> ⚠️ **Active initiative — Frontend visual redesign in progress (week of 2026-04-28).**
+> The visual layer of the SPA is being replaced. Data model, Firestore rules, Cloud Functions, access control, and `LANE_MAP` are explicitly **out of scope** unless the user instructs otherwise. **See §19 for the full scope, operating rules, and status.** Existing §13 "Design System" describes the *current* state — it will be rewritten when the redesign lands.
+
 ---
 
 ## 1. One-line Project Identity
@@ -108,10 +111,10 @@ project-tracker/
 │   │   └── useToast.js               # Toast queue hook
 │   ├── pages/
 │   │   ├── Admin.jsx                 # Access + service config (admins only)
-│   │   ├── Ares.jsx                  # ⚠️ LEGACY / UNROUTED — safe to archive
 │   │   ├── BoardPage.jsx             # Main work surface — 3 tabs: Request/Dashboard/Timeline
 │   │   ├── LoginPage.jsx             # Google sign-in screen
 │   │   └── Settings.jsx              # Per-user settings + board configuration modal
+│   │   (Ares.jsx archived — see docs/archive/legacy-pages/Ares.jsx, §15)
 │   ├── App.jsx                       # Router + providers + auth gating
 │   ├── firebase.js                   # Firebase app init (projectId: phobos-9246e)
 │   ├── index.css                     # Tailwind imports + theme tokens + component classes
@@ -126,7 +129,7 @@ project-tracker/
 ```
 
 **Files to know cold:**
-- [src/pages/BoardPage.jsx](src/pages/BoardPage.jsx) — ~5,500 lines, by far the heaviest file. Houses the three tabs plus a dozen nested components (RequestTab, RequestVolumeSection, TimelineTab, CustomColumnsModal, CustomFieldCell, ThroughputKpiPanel, PipelineDistribution, SectionCard, FilterPicker, SortTh, CycleTimeSummary, RequestVolumeSection, KpiTile, and more).
+- [src/pages/BoardPage.jsx](src/pages/BoardPage.jsx) — **5,511 lines**, by far the heaviest file. Houses the three tabs plus a dozen nested components (RequestTab, RequestVolumeSection, TimelineTab, CustomColumnsModal, CustomFieldCell, ThroughputKpiPanel, PipelineDistribution, SectionCard, FilterPicker, SortTh, CycleTimeSummary, RequestVolumeSection, KpiTile, and more).
 - [src/pages/Settings.jsx](src/pages/Settings.jsx) — Per-user settings + the `BoardConfigModal` that consolidates Dates/SLA/Passes/External-users per board.
 - [src/pages/Admin.jsx](src/pages/Admin.jsx) — Shared service credentials + admin list + per-board source and user assignments.
 
@@ -214,28 +217,40 @@ Firestore rules enforce `id == requestId` and `status in ['open','on-hold','clos
 }
 ```
 
-### 6.5 `cache/manual_{boardId}` shape (populated by Cloud Functions)
+### 6.5 `cache/{source}_{boardId}` shape (populated by Cloud Functions)
+
+Phase 0d (2026-04-28) unified the shape across both `cache/manual_*` (Trello-source) and `cache/ares_*` (Phobos-source) docs. Frontend reads via `onSnapshot`; never writes (rules deny client writes).
 
 ```jsonc
 {
-  "activeCards":     [ /* normalized card objects */ ],
-  "doneCards":       [ /* normalized card objects */ ],
-  "completionDates": { "cardId": "2026-03-12T…" },        // last move INTO a Done lane
-  "activatedDates":  { "cardId": "2026-02-01T…" },        // first move OUT of a Pending lane
-  "cycleDays":       { "cardId": 39.5 },                  // completion − activation in days
-  "lastActionDate":  "2026-03-18T08:00:00.000Z",          // incremental sync cursor
-  "updatedAt":       <Firestore timestamp>,
-  "boardId":         "hLL7WW2V",
-  "trelloShortId":   "hLL7WW2V"
+  "activeCards":              [ /* normalized card objects */ ],
+  "doneCards":                [ /* normalized — capped: see note below */ ],
+  "doneCardsTotalAvailable":  4823,                       // uncapped count for UI disclosure
+  "doneCardsCutoffMs":        1729108800000,              // ms since epoch — older than this dropped
+  "completionDates":          { "cardId": "2026-03-12T…" }, // last move INTO a Done lane
+  "activatedDates":           { "cardId": "2026-02-01T…" }, // first move OUT of a Pending lane
+  "cycleDays":                { "cardId": 39.5 },         // manual only; Ares is intentionally {} (Phase 0d)
+  "lastActionDate":           "2026-03-18T08:00:00.000Z", // incremental sync cursor
+  "updatedAt":                <Firestore timestamp>,
+  "boardId":                  "hLL7WW2V",
+  "source":                   "manual",                   // "manual" | "ares"
+  "trelloShortId":            "hLL7WW2V",                 // manual only
+  "boardName":                "GCash: Design Support 2026", // ares only (from /boards/:id/summary)
+  // Health (Phase 0d — see §10.x):
+  "lastSyncStatus":           "success",                  // "success" | "failed"
+  "lastSuccessfulSync":       <Firestore timestamp>,      // updated only on success runs
+  "lastSyncError":            null,                       // string when status==='failed'
+  "consecutiveFailures":      0                           // resets to 0 on success
 }
 ```
+
+**Done-card retention cap.** `doneCards` in `cache/{source}_{boardId}` is trimmed to stay under Firestore's 1 MiB document size limit. Two limits apply, in order: (1) date cap — keep cards with `dateLastActivity` within `DONE_CARDS_RETENTION_DAYS = 365` (12 months); (2) count cap — if more than `DONE_CARDS_HARD_CAP = 1000` cards still qualify after the date filter, keep the 1000 most recent by `dateLastActivity`. The `completionDates` and `activatedDates` maps are then pruned to only include cardIds that survived the cap (otherwise the maps would carry entries for cards we've dropped and re-bloat the doc). Older done cards remain in the source system (Trello / Phobos) but are not surfaced through the cache. `doneCardsTotalAvailable` reflects the uncapped count and is recorded so a future UI can disclose "+N older cards not loaded". The caps are symmetric across both sync paths — defensive uniformity. All three constants (and the `pruneMapsToCachedCards` helper) live in [functions/index.js](functions/index.js); tune downward if a board ever approaches 1 MiB again.
 
 ### 6.6 localStorage keys (seeded from Firestore on login)
 
 | Key | Source | Used by |
 |---|---|---|
 | `phobos_host`, `phobos_api_key` | `config.services.phobosHost/ApiKey` (falls back to legacy `aresHost`/`aresApiKey`) | [src/api/phobos.js](src/api/phobos.js) |
-| `raintool_host` | `config.services.raintoolHost` | `rtClient()` in [phobos.js:23](src/api/phobos.js#L23) |
 | `trello_api_key`, `trello_token` | `config.services.trelloApiKey/Token` | [src/api/trello.js](src/api/trello.js) |
 | `hidden_board_ids` | `userPrefs[email].hiddenBoardIds` | Sidebar + Settings |
 | `pass_tracking` | `userPrefs[email].passTracking` | BoardPage + Settings |
@@ -243,7 +258,6 @@ Firestore rules enforce `id == requestId` and `status in ['open','on-hold','clos
 | `requests_{boardId}` | legacy local-only request store | migrated once to Firestore by [api/requests.js:34](src/api/requests.js#L34) then deleted |
 | `req_targets_{boardId}` | local-only Request Volume targets | `ReqTargetsPanel` (BoardPage) |
 | `targets_{boardId}` | local-only cycle-time targets | Dashboard KPIs |
-| `rt_project_{boardId}` | local-only — Raintool project for cycle time (Ares boards) | (Integrations section has been removed from Settings UI but the lookup still happens in BoardPage) |
 
 > The `config.services.*` → localStorage seeding happens in [AccessContext.jsx:13-22](src/context/AccessContext.jsx#L13-L22) on every snapshot tick. Legacy `aresHost`/`aresApiKey` fields are still read for backwards compat.
 
@@ -316,7 +330,7 @@ Per-user settings surface. Sections (gated by role):
 
 ### 9.4 Admin — [src/pages/Admin.jsx](src/pages/Admin.jsx) (admins only)
 
-1. **Backend Services** — shared Phobos host/API key, Raintool host, Trello key/token. Includes JSON import/export.
+1. **Backend Services** — shared Phobos host/API key, Trello key/token. Includes JSON import/export.
 2. **Google Account** — (mirror of Settings).
 3. **Appearance** — theme toggle.
 4. **Admins** — email list editor for `config.admins[]`.
@@ -330,7 +344,7 @@ Per-user settings surface. Sections (gated by role):
 
 ### 9.5 BoardPage — [src/pages/BoardPage.jsx](src/pages/BoardPage.jsx)
 
-The main work surface, split into **three tabs** (`activeTab` state, defined at [BoardPage.jsx:4916-4920](src/pages/BoardPage.jsx#L4916-L4920)):
+The main work surface, split into **three tabs**. `activeTab` state initialized at [BoardPage.jsx:4120](src/pages/BoardPage.jsx#L4120) (initial: `'dashboard'`, then auto-switched to `'request'` on board mount via the effect at [BoardPage.jsx:4449](src/pages/BoardPage.jsx#L4449)). The `TABS` array — `[Request, Dashboard, Timeline]` — is at [BoardPage.jsx:4916-4920](src/pages/BoardPage.jsx#L4916-L4920):
 
 #### 9.5.1 Request tab (default landing tab)
 
@@ -389,11 +403,9 @@ Defined in [src/pages/BoardPage.jsx:86](src/pages/BoardPage.jsx#L86) AND mirrore
 
 ### 10.2 Cycle time & completion date
 
-- **Completion date** = last move into a Done lane (from movements). If the board has no movement data at all, falls back to `dateLastActivity`.
-- **First activation** = earliest move *out of* a Pending lane. Cards created directly in an active lane will not have this.
-- **Cycle days** = completion − activation (days, one decimal).
-
-For manual boards this is computed server-side in [functions/index.js:300-307](functions/index.js#L300-L307). For Ares boards this comes from Phobos `cycleTime()` (requires Raintool project ID).
+- **Completion date** = last move into a Done lane (from movements). If the board has no movement data at all, falls back to `dateLastActivity`. Computed server-side for both sources and stored in `cache/{source}_{boardId}.completionDates`.
+- **First activation** = earliest move *out of* a Pending lane. Cards created directly in an active lane will not have this. Stored in `cache/{source}_{boardId}.activatedDates` and powers the WIP-age (85p) calculation.
+- **Cycle days** (completion − activation, days, one decimal) is computed server-side by the Cloud Function for **Manual boards only**. **Ares boards do not surface cycle time post-2026-04-28** — `cycleDays` is intentionally `{}` in `cache/ares_*` docs (Phase 0d Raintool removal). The Done (85p) tile and the Done Cards drilldown cycle column render `—` for Ares boards as a result; layout is preserved.
 
 ### 10.3 Card type — Work vs Process
 
@@ -479,6 +491,8 @@ Two exports, both under `us-central1`:
 
 **Deploy functions:** `firebase deploy --only functions` (separate from the GitHub Pages SPA deploy).
 
+**Runtime target:** `functions/package.json` declares `engines.node: "22"`. Cloud Functions deploy will provision a Node 22 runtime regardless of the developer's local Node version, but for parity-friendly local debugging, prefer Node 22 (e.g. via `nvm-windows`). Newer Node majors will produce an `EBADENGINE` warning on `npm install` inside `functions/` — warning only, not blocking.
+
 ---
 
 ## 13. Design System
@@ -493,8 +507,16 @@ Two exports, both under `us-central1`:
   --color-text-muted:   107 114 128;
   --color-border:       42 42 46;
 }
-html.light { /* lighter palette */ }
+html.light {
+  --color-bg:           245 245 247;
+  --color-surface:      255 255 255;
+  --color-text-primary: 17 19 24;
+  --color-text-muted:   107 114 128;
+  --color-border:       228 228 231;
+}
 ```
+
+The light theme also includes three legacy `bg-white/5`-style overrides at [src/index.css:29-31](src/index.css#L29-L31) that translate Tailwind's white-alpha utilities into low-alpha black for light backgrounds. Any redesign that adds new `bg-white/N` classes may need matching overrides — or, preferably, replace them with token-based surfaces.
 
 Tokens are exposed to Tailwind via `rgb(var(--color-bg) / <alpha-value>)` syntax in [tailwind.config.js:6-13](tailwind.config.js#L6-L13). Accent is fixed at `#6366f1` (indigo).
 
@@ -557,10 +579,10 @@ Also review the project cheat sheet: [.referenceMaterials/OPS_ CAPS - Miro's PPM
 Before you touch anything in these areas, know that current docs or files may contradict live code. Ask before relying on them:
 
 - **`public/access-config.json`** — used to be the source of truth; now ignored at runtime. Firestore `config/access` is authoritative.
-- **`src/pages/Ares.jsx`** — **not routed** in [src/App.jsx](src/App.jsx). It is a prototype of the Dashboard tab from before the multi-tab refactor. Safe to archive / delete. Do not add routing for it without explicit user approval.
+- **`src/pages/Ares.jsx`** — **archived** to [docs/archive/legacy-pages/Ares.jsx](docs/archive/legacy-pages/Ares.jsx) on 2026-04-28 (Phase 0c). It was a prototype of the Dashboard tab from before the multi-tab refactor; not imported anywhere. Kept for reference, not routed.
 - **"Google Identity Services / google_client_id"** — mentioned in the old CLAUDE.md and some reference materials. Auth is Firebase only.
 - **Utilization tab** — documented in reference materials but **does not exist in the code**. The backend proxy was never deployed. There is no `UtilizationTab.jsx` file, no `/api/runn.js`. Ignore references to it until the user decides to build it.
-- **Integrations (Raintool project picker) in Settings** — was removed from the Settings Board Configuration modal. The `rt_project_{boardId}` localStorage key is still consulted by the Dashboard cycle time code, but there is no UI to set it today.
+- **Raintool integration has been fully removed (2026-04-28 as part of Phase 0d).** The `cycleTime` endpoint, `rtClient`, `raintoolHost` config field, `raintool_host` localStorage seeding, and `rt_project_{boardId}` localStorage values are all gone from active code paths. Orphaned localStorage values on returning users' machines are inert.
 - **Old `ares_host` / `ares_api_key` localStorage keys** — legacy; `phobos_host` / `phobos_api_key` are the current names. Reads fall back to the old keys for backwards compat.
 - **`migrateLocalRequests()`** in [src/api/requests.js:34](src/api/requests.js#L34) — one-time migration of localStorage requests into Firestore. Still fires on load; harmless after migration since it removes the localStorage key first.
 
@@ -578,7 +600,7 @@ Before you touch anything in these areas, know that current docs or files may co
 | Change who can configure a board | `canManageColumns` in BoardPage's RequestTab invocation + `admin || isFrost` checks in Settings's `BoardConfigModal` |
 | Change access rules | [src/api/access.js](src/api/access.js) helpers + [firestore.rules](firestore.rules) |
 | Add a new per-board config field | Extend `config.boards[id].*` in Firestore (via `updateConfig`) + consume it wherever needed. Firestore rules don't validate board-level fields. |
-| Change the Cloud Function sync schedule | `onSchedule({ schedule: '...' })` in [functions/index.js:371](functions/index.js#L371). Deploy with `firebase deploy --only functions`. |
+| Change the Cloud Function sync schedule | `onSchedule({ schedule: '...' })` in [functions/index.js:370](functions/index.js#L370). Deploy with `firebase deploy --only functions`. |
 | Change the sync behavior for a new lane | Update BOTH `LANE_MAP`s AND consider whether existing cached data in `cache/manual_{id}` needs clearing |
 | Add a new theme color | Add CSS token to [src/index.css](src/index.css) `:root` + `html.light` blocks, map in [tailwind.config.js](tailwind.config.js) |
 | Add a new reference material | Drop it in [.referenceMaterials/](.referenceMaterials/) and add an entry to §14 |
@@ -604,3 +626,49 @@ Before you touch anything in these areas, know that current docs or files may co
 - **Main branch:** `main`.
 - **GitHub:** `https://github.com/MiroGonda/project-tracker.git`.
 - **Primary user/maintainer:** `miro.gonda@gmail.com`.
+
+---
+
+## 19. Active Initiative — Frontend Visual Redesign
+
+**Started:** 2026-04-28. **Owner:** `miro.gonda@gmail.com`. **Status:** Pre-implementation analysis underway in a separate session; no redesign code has landed yet.
+
+The frontend visual layer of the SPA is being **replaced**. This is a deliberate, scoped redesign — not a refactor — and any agent picking up work this week should treat the existing visual language as transitional.
+
+### 19.1 In scope (free to redesign)
+
+- **Design tokens** — [src/index.css](src/index.css) `:root` and `html.light` palettes, accent color, `font-family`.
+- **Tailwind theme extension** — [tailwind.config.js](tailwind.config.js) `theme.extend.colors`, fonts, radii, shadows.
+- **Component primitives** — `.input` / `.btn-primary` / `.btn-secondary` in [src/index.css](src/index.css) `@layer components`.
+- **Shared UI components** — `<SectionCard>`, `<KpiTile>`, `<FilterPicker>`, `<ConfigSection>`, `<SortTh>`, the `<Sidebar />` chrome, the page-shell layout in [src/App.jsx](src/App.jsx).
+- **Page layouts** — Request / Dashboard / Timeline tab bodies in [src/pages/BoardPage.jsx](src/pages/BoardPage.jsx), Settings, Admin, LoginPage. Spacing, density, hierarchy, typography.
+- **Micro-interactions** — hover, focus, active states, transitions, loading skeletons, toast styling.
+- **Iconography** — currently `lucide-react`. May be augmented or swapped if the new system requires it.
+
+### 19.2 Out of scope (do not change without explicit user approval)
+
+These layers stay stable so the redesign cannot break correctness, data, or access:
+
+- **Firestore data model** (§6) — collection paths, document shapes, field names. Visual swaps do not require Firestore writes.
+- **Firestore security rules** (§11) — [firestore.rules](firestore.rules).
+- **Cloud Functions logic** (§12) — sync routine, scheduling, Trello action processing.
+- **`LANE_MAP`** (§10.1) — both copies (BoardPage + functions) must remain in lockstep and unchanged unless the user adds a new lane.
+- **Access control model** (§8) — admin / frost / external roles and the helpers in [src/api/access.js](src/api/access.js).
+- **GitHub Pages deploy config** (§2) — base path, 404.html copy plugin, `basename` in [src/App.jsx](src/App.jsx).
+- **Firebase project ID** `phobos-9246e`.
+- **localStorage seeding behavior** in `AccessContext` (§6.6).
+
+### 19.3 Operating rules during the redesign
+
+1. **Never push a broken build to `main`** (§2 / §17) — every push deploys live. `npm run build` must succeed before push.
+2. **No silent data shape changes.** A redesign should not require new fields. If a redesign genuinely needs one (e.g., a new per-board UI preference), discuss it before introducing it to `config/access`.
+3. **Token-first, then components, then pages.** Changing a CSS token or Tailwind theme value updates the entire app at once — prefer that over rewriting class lists in JSX.
+4. **`§17` Rules of Engagement still apply** — including the "no pill-style Stage/Deadline" convention. The redesign *may* revisit that rule, but only with explicit approval; do not assume it's lifted.
+5. **Keep both light and dark working.** The `html.light` class on `<html>` is the only switch. Test both modes before committing visual changes.
+6. **Leave §13 (Design System) in place until the redesign stabilizes.** §13 documents the *current* state. When the new system lands, §13 will be rewritten in a single pass — not edited piecemeal — and this §19 will be archived to §15 (Legacy / Known-Obsolete) or deleted.
+7. **No partial migrations across files.** If a button style is changing, change every button, not a representative sample. Half-migrated visual states are worse than either old or new.
+8. **Coordinate with the maintainer's analysis session.** A separate analysis session is running this week to scope the redesign. Wait for direction from that session before making system-wide visual changes; cosmetic fixes and bug fixes remain fair game.
+
+### 19.4 Status log
+
+- **2026-04-28** — Fresh-machine setup completed (Node 24 LTS via winget, Firebase CLI 15, npm clean install root + `functions/`, `npm run build` green). Git remote rotated off the leaked PAT, now uses Credential Manager. Firebase CLI logged in as `miro.gonda@gmail.com`, `phobos-9246e` set current. Ready for redesign work; analysis session starting in a separate Claude conversation.

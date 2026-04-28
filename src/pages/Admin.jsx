@@ -69,7 +69,6 @@ export default function Admin() {
   // Backend API config state — initialised from localStorage (seeded by AccessContext from Firestore)
   const [phobosHost,   setPhobosHost]   = useState(() => localStorage.getItem('phobos_host')    || localStorage.getItem('ares_host')    || '')
   const [phobosApiKey, setPhobosApiKey] = useState(() => localStorage.getItem('phobos_api_key') || localStorage.getItem('ares_api_key') || '')
-  const [raintoolHost, setRaintoolHost] = useState(() => localStorage.getItem('raintool_host')  || 'https://hailstorm.frostdesigngroup.com')
   const [trelloApiKey, setTrelloApiKey] = useState(() => localStorage.getItem('trello_api_key') || '')
   const [trelloToken,  setTrelloToken]  = useState(() => localStorage.getItem('trello_token')   || '')
 
@@ -81,7 +80,6 @@ export default function Admin() {
     const svc = config.services
     if (svc.phobosHost   || svc.aresHost)   setPhobosHost(svc.phobosHost   || svc.aresHost)
     if (svc.phobosApiKey || svc.aresApiKey) setPhobosApiKey(svc.phobosApiKey || svc.aresApiKey)
-    if (svc.raintoolHost) setRaintoolHost(svc.raintoolHost)
     if (svc.trelloApiKey) setTrelloApiKey(svc.trelloApiKey)
     if (svc.trelloToken)  setTrelloToken(svc.trelloToken)
   }, [config])
@@ -298,15 +296,16 @@ export default function Admin() {
       ...(config?.services || {}),
       phobosHost:   phobosHost.trim(),
       phobosApiKey: phobosApiKey.trim(),
-      raintoolHost: raintoolHost.trim(),
       trelloApiKey: trelloApiKey.trim(),
       trelloToken:  trelloToken.trim(),
     }
+    // raintoolHost is intentionally not edited here (Phase 0d Raintool removal),
+    // but we preserve any existing value via the spread above so we don't strip
+    // it from Firestore on save — admins can clean it up manually if desired.
     updateConfig({ ...config, services })
     // Seed localStorage immediately so the current session works right away
     localStorage.setItem('phobos_host',    services.phobosHost)
     localStorage.setItem('phobos_api_key', services.phobosApiKey)
-    localStorage.setItem('raintool_host',  services.raintoolHost)
     localStorage.setItem('trello_api_key', services.trelloApiKey)
     localStorage.setItem('trello_token',   services.trelloToken)
     toast.success('Backend configuration saved.')
@@ -389,11 +388,6 @@ export default function Admin() {
               <label className="block text-xs text-text-muted mb-1 flex items-center gap-1"><Key size={11} /> Ares API Key</label>
               <input className="input" type="password" placeholder="••••••••••••"
                 value={phobosApiKey} onChange={e => setPhobosApiKey(e.target.value)} />
-            </div>
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Raintool Host</label>
-              <input className="input" placeholder="https://hailstorm.frostdesigngroup.com"
-                value={raintoolHost} onChange={e => setRaintoolHost(e.target.value)} />
             </div>
             <div>
               <label className="block text-xs text-text-muted mb-1 flex items-center gap-1"><Key size={11} /> Trello API Key</label>

@@ -16,9 +16,9 @@ function seedLocalStorage(c) {
   const phApiKey = svc.phobosApiKey || svc.aresApiKey || ''
   if (phHost)           localStorage.setItem('phobos_host',    phHost)
   if (phApiKey)         localStorage.setItem('phobos_api_key', phApiKey)
-  if (svc.raintoolHost) localStorage.setItem('raintool_host',  svc.raintoolHost)
   if (svc.trelloApiKey) localStorage.setItem('trello_api_key', svc.trelloApiKey)
   if (svc.trelloToken)  localStorage.setItem('trello_token',   svc.trelloToken)
+  // raintool_host seeding removed 2026-04-28 (Phase 0d Raintool removal).
 }
 
 export function AccessProvider({ children }) {
