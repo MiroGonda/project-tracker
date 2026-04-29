@@ -196,7 +196,7 @@ const LANE_MAP = {
   '➜ Render: With Revision':                      { type: 'Process Lane', category: 'Assets',   status: 'Revising' },
   '➜ Render: Working on Revision':                { type: 'Process Lane', category: 'Assets',   status: 'Revising' },
   '➜ Render: Ready for Client Approval':          { type: 'Process Lane', category: 'Assets',   status: 'For Approval' },
-  '-> Render: Sent for Client Approval':          { type: 'Process Lane', category: 'Assets',   status: 'For Approval' },
+  '➜ Render: Sent for Client Approval':           { type: 'Process Lane', category: 'Assets',   status: 'For Approval' },
   '➜ Render: Done':                               { type: 'Process Lane', category: 'Assets',   status: 'Done' },
   '➜ Ready for CRM Review':                       { type: 'Process Lane', category: 'Assets',   status: 'Ongoing' },
   '➜ Sent for CRM Review':                        { type: 'Process Lane', category: 'Assets',   status: 'Ongoing' },
