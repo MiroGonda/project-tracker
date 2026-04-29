@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 
 let _id = 0
 
@@ -14,11 +14,13 @@ export default function useToast() {
     setToasts(prev => prev.filter(t => t.id !== id))
   }, [])
 
-  const toast = {
+  // Memoize so consumers can safely include `toast` in useEffect deps without
+  // triggering re-subscribe loops on every render.
+  const toast = useMemo(() => ({
     success: (msg, dur) => addToast(msg, 'success', dur),
     error:   (msg, dur) => addToast(msg, 'error',   dur),
     info:    (msg, dur) => addToast(msg, 'info',    dur),
-  }
+  }), [addToast])
 
   return { toasts, toast, dismiss }
 }
