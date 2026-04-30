@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import { onAuthStateChanged } from 'firebase/auth'
 import { onSnapshot } from 'firebase/firestore'
 import { auth } from '../firebase'
@@ -7,6 +7,7 @@ import {
   getAccessibleBoardIds, saveAccessConfig, getUserBoardRole,
 } from '../api/access'
 import { fetchUserPrefs, saveUserPrefs } from '../api/userPrefs'
+import { listBoards } from '../api/phobos'
 
 const AccessContext = createContext()
 
@@ -31,6 +32,15 @@ export function AccessProvider({ children }) {
     try { return new Set(JSON.parse(localStorage.getItem('hidden_board_ids') || '[]')) }
     catch { return new Set() }
   })
+
+  // Phobos /boards list — single fetch hoisted from Sidebar/Settings/Admin to
+  // dedupe the cold-cache race that fired multiple parallel requests on full
+  // page load. Phobos's 5-min localStorage cache in api/phobos.js stays as
+  // defense-in-depth; this layer ensures consumers share one in-flight call.
+  const [apiBoards,        setApiBoards]        = useState([])
+  const [apiBoardsLoading, setApiBoardsLoading] = useState(false)
+  const [apiBoardsError,   setApiBoardsError]   = useState(null)
+  const apiBoardsInflight  = useRef(null)  // shared Promise — null when no fetch is active
 
   // Track Firebase Auth state; seed user preferences from Firestore on login
   // Also track authUser so the onSnapshot can re-subscribe when auth changes
@@ -109,6 +119,51 @@ export function AccessProvider({ children }) {
     saveAccessConfig(next).catch(e => console.error('Failed to save config:', e))
   }, [])
 
+  /**
+   * Fetch the Phobos board list and store on context. Concurrent callers share
+   * the same in-flight Promise (dedupe). Pass force=true to bypass the
+   * phobos.js localStorage cache (e.g., Admin's "Load Ares boards" button).
+   * Resolves to a deduped boards array on success; rejects on failure (callers
+   * that don't care about errors can `.catch(() => {})`).
+   */
+  const refreshApiBoards = useCallback((force = false) => {
+    if (apiBoardsInflight.current && !force) return apiBoardsInflight.current
+    const host = localStorage.getItem('phobos_host')    || localStorage.getItem('ares_host')
+    const key  = localStorage.getItem('phobos_api_key') || localStorage.getItem('ares_api_key')
+    if (!host || !key) return Promise.resolve([])
+    setApiBoardsLoading(true)
+    setApiBoardsError(null)
+    const p = listBoards(force)
+      .then(boards => {
+        const seen = new Set()
+        const deduped = (boards || []).filter(b => {
+          if (!b?.id || seen.has(b.id)) return false
+          seen.add(b.id)
+          return true
+        })
+        setApiBoards(deduped)
+        setApiBoardsLoading(false)
+        apiBoardsInflight.current = null
+        return deduped
+      })
+      .catch(e => {
+        setApiBoardsError(e?.message || 'Failed to load boards')
+        setApiBoardsLoading(false)
+        apiBoardsInflight.current = null
+        throw e
+      })
+    apiBoardsInflight.current = p
+    return p
+  }, [])
+
+  // Auto-fetch once when config first loads (credentials are seeded by then).
+  // Subsequent re-mounts of Sidebar/Settings reuse the context state without
+  // refetching; Admin's button calls refreshApiBoards(true) to force.
+  useEffect(() => {
+    if (!configReady) return
+    refreshApiBoards().catch(() => { /* error surfaced via apiBoardsError */ })
+  }, [configReady, refreshApiBoards])
+
   const loading       = !authReady || !configReady
   const admin         = isAdmin(config, email)
   const canAdmin      = canAdminister(config, email)
@@ -125,6 +180,7 @@ export function AccessProvider({ children }) {
       getBoardRole,
       reload,
       hiddenIds, toggleBoardHidden,
+      apiBoards, apiBoardsLoading, apiBoardsError, refreshApiBoards,
     }}>
       {children}
     </AccessContext.Provider>

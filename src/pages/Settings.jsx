@@ -8,7 +8,6 @@ import {
   connectGoogle,
   disconnectGoogle,
 } from '../api/google'
-import { listBoards } from '../api/phobos'
 import { fetchBoardCustomFields, createCustomField } from '../api/trello'
 import { saveUserPrefs } from '../api/userPrefs'
 import Toast from '../components/Toast'
@@ -277,7 +276,7 @@ function ExternalUserManager({ boardId, config, updateConfig, flat = false }) {
 
 export default function Settings() {
   const { isDark, toggleTheme }    = useTheme()
-  const { refreshEmail, admin, getBoardRole, accessibleIds, config, updateConfig, email, loading: configLoading, hiddenIds, toggleBoardHidden } = useAccess()
+  const { refreshEmail, admin, getBoardRole, accessibleIds, config, updateConfig, email, loading: configLoading, hiddenIds, toggleBoardHidden, apiBoards } = useAccess()
   const { toasts, toast, dismiss } = useToast()
 
   // Google auth
@@ -288,8 +287,9 @@ export default function Settings() {
   // Per-board configuration modal
   const [configFor, setConfigFor] = useState(null)
 
-  // Board visibility
-  const [allBoards, setAllBoards] = useState([])
+  // Board visibility — sourced from AccessContext (single fetch shared across
+  // Sidebar/Settings/Admin per Phase 0e Item 3 dedup).
+  const allBoards = apiBoards
 
   // Pass Tracking
   const [passConfig,       setPassConfig]       = useState(() => getPassTrackingConfig())
@@ -303,17 +303,6 @@ export default function Settings() {
     setGoogleConnected(isGoogleConnected())
     setGoogleEmail(getGoogleEmail())
   }, [])
-
-  useEffect(() => {
-    if (configLoading) return
-    const host = localStorage.getItem('phobos_host')   || localStorage.getItem('ares_host')
-    const key  = localStorage.getItem('phobos_api_key') || localStorage.getItem('ares_api_key')
-    if (!host || !key) return
-    listBoards().then(boards => {
-      const seen = new Set()
-      setAllBoards(boards.filter(b => { if (seen.has(b.id)) return false; seen.add(b.id); return true }))
-    }).catch(() => {})
-  }, [configLoading])
 
   // Boards this user can configure (admin sees all, frost sees their boards)
   const configurableBoards = admin

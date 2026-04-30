@@ -8,7 +8,6 @@ import {
 } from 'lucide-react'
 import { useAccess } from '../context/AccessContext'
 import { useTheme } from '../context/ThemeContext'
-import { listBoards } from '../api/phobos'
 import {
   isGoogleConfigured, isGoogleConnected, getGoogleEmail,
   connectGoogle, disconnectGoogle,
@@ -62,7 +61,7 @@ function AddEmailInput({ onAdd, placeholder = 'user@example.com' }) {
 }
 
 export default function Admin() {
-  const { config, updateConfig, canAdmin, email, reload, loading } = useAccess()
+  const { config, updateConfig, canAdmin, email, reload, loading, refreshApiBoards } = useAccess()
   const { isDark, toggleTheme } = useTheme()
   const { toasts, toast, dismiss } = useToast()
 
@@ -136,7 +135,7 @@ export default function Admin() {
     }
     setBoardsLoading(true)
     setBoardsError(null)
-    listBoards()
+    refreshApiBoards(true)
       .then(boards => {
         const nextBoards = { ...draft.boards }
         let added = 0
@@ -162,7 +161,7 @@ export default function Admin() {
         setBoardsError(msg)
       })
       .finally(() => setBoardsLoading(false))
-  }, [draft, updateConfig, toast])
+  }, [draft, updateConfig, toast, refreshApiBoards])
 
   if (!canAdmin) {
     return (

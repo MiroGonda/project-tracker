@@ -1,31 +1,21 @@
 import { NavLink } from 'react-router-dom'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import {
   Settings, ShieldCheck, ChevronLeft, ChevronRight,
   Zap, PenLine,
 } from 'lucide-react'
 import { useAccess } from '../context/AccessContext'
-import { listBoards } from '../api/phobos'
 import Spinner from './Spinner'
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 
 export default function Sidebar() {
-  const [collapsed,     setCollapsed]     = useState(false)
-  const [apiBoards,     setApiBoards]     = useState([])
-  const [boardsLoading, setBoardsLoading] = useState(false)
+  const [collapsed, setCollapsed] = useState(false)
 
-  const { admin, canAdmin, accessibleIds, loading: configLoading, email, config, hiddenIds } = useAccess()
-
-  // Re-fetch boards when config finishes loading (API keys may have just been seeded)
-  useEffect(() => {
-    if (configLoading) return
-    const host   = localStorage.getItem('phobos_host')   || localStorage.getItem('ares_host')
-    const apiKey = localStorage.getItem('phobos_api_key') || localStorage.getItem('ares_api_key')
-    if (!host || !apiKey) return
-    setBoardsLoading(true)
-    listBoards().then(setApiBoards).catch(() => {}).finally(() => setBoardsLoading(false))
-  }, [configLoading])
+  const {
+    admin, canAdmin, accessibleIds, loading: configLoading, email, config, hiddenIds,
+    apiBoards, apiBoardsLoading: boardsLoading,
+  } = useAccess()
 
   // hiddenIds is now provided by AccessContext for cross-component reactivity
 
