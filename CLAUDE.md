@@ -24,6 +24,7 @@ A **React + Vite single-page app** hosted on GitHub Pages that provides per-boar
 - **Verify before pushing:** `npm run build` must succeed. A broken build breaks the live dashboard for every user.
 - **GitHub Pages base path:** `base: '/project-tracker/'` in [vite.config.js:22](vite.config.js#L22) and `basename: '/project-tracker'` in [src/App.jsx:49](src/App.jsx#L49). These two MUST stay in sync or the site 404s after deploy.
 - **SPA fallback:** The Vite build plugin in [vite.config.js:13-20](vite.config.js#L13-L20) copies `dist/index.html` → `dist/404.html` so GitHub Pages serves the SPA for deep links. Do not remove.
+- **SPA route 404 in console — expected behavior:** direct loads of SPA routes (e.g., `/board/{id}`, `/settings`, `/admin`) produce a console `404` line from GitHub Pages before the `404.html` fallback hands control to the SPA shell. The SPA router then renders the requested route normally. This is how a static-hosted SPA serves deep links — the console line is **not** an actionable error and does not indicate a broken route. (Phase 0e Item 5's ArYIZvEC investigation confirmed an instance of this in the wild.)
 - **Firebase deploys are separate** — see §12 (Cloud Functions).
 
 ---
@@ -87,8 +88,13 @@ A **React + Vite single-page app** hosted on GitHub Pages that provides per-boar
 project-tracker/
 ├── .github/workflows/deploy.yml      # GitHub Pages deploy
 ├── .referenceMaterials/              # API + design references (see §14)
+├── docs/
+│   ├── design/
+│   │   └── DESIGN-ibm.md             # Carbon Design System spec — canonical source for visual decisions (Phase 1+)
+│   └── PHASE_1_TOKEN_MAP.md          # Phase 1 token migration record (legacy → Carbon)
 ├── functions/
 │   ├── index.js                      # Cloud Functions: syncBoardHttp + syncAllBoards
+│   ├── scripts/                      # Re-runnable diagnostic scripts (read-only, ADC-auth)
 │   └── package.json
 ├── public/
 │   └── access-config.json            # LEGACY — no longer the source of truth
@@ -124,7 +130,7 @@ project-tracker/
 ├── index.html                        # Vite entry — <title>Phobos Requests Tracker</title>
 ├── package.json                      # name: "ares-dashboard" (legacy)
 ├── postcss.config.js                 # Tailwind + autoprefixer
-├── tailwind.config.js                # Theme extension (accent, bg, surface, text-*, border)
+├── tailwind.config.js                # Theme extension — Carbon tokens (cds-*) + legacy aliases (bg, surface, accent, text-*, border) + IBM Plex font stacks + Carbon type scale + 8px-grid spacing + radii / shadow tokens
 └── vite.config.js                    # base: '/project-tracker/' + 404.html copy plugin
 ```
 
@@ -495,62 +501,78 @@ Two exports, both under `us-central1`:
 
 ---
 
-## 13. Design System
+## 13. Design System — IBM Carbon adoption (Phase 1+)
 
-### 13.1 CSS tokens ([src/index.css](src/index.css))
+The visual layer follows the **IBM Carbon Design System**. Adoption is total per DIRECTIVE.md §4 — when a Carbon convention conflicts with a prior Phobos convention, Carbon wins. Two documented exclusions: `lucide-react` icons stay (Carbon's `ibm_icons` font is not adopted), and pill-shaped tags follow §17's existing scope restrictions, not Carbon's broad tag adoption.
 
-```css
-:root {                         /* dark (default) */
-  --color-bg:           15 15 15;
-  --color-surface:      28 28 30;
-  --color-text-primary: 232 232 232;
-  --color-text-muted:   107 114 128;
-  --color-border:       42 42 46;
-}
-html.light {
-  --color-bg:           245 245 247;
-  --color-surface:      255 255 255;
-  --color-text-primary: 17 19 24;
-  --color-text-muted:   107 114 128;
-  --color-border:       228 228 231;
-}
-```
+**Canonical sources**
+- Spec: [docs/design/DESIGN-ibm.md](docs/design/DESIGN-ibm.md) — Carbon translation guide (palette, typography, spacing, radii, shadows, behavior).
+- Phase 1 migration record: [docs/PHASE_1_TOKEN_MAP.md](docs/PHASE_1_TOKEN_MAP.md) — old token → new token map, semantic shifts, and the judgment calls made during translation.
 
-The light theme also includes three legacy `bg-white/5`-style overrides at [src/index.css:29-31](src/index.css#L29-L31) that translate Tailwind's white-alpha utilities into low-alpha black for light backgrounds. Any redesign that adds new `bg-white/N` classes may need matching overrides — or, preferably, replace them with token-based surfaces.
+### 13.1 Tokens ([src/index.css](src/index.css))
 
-Tokens are exposed to Tailwind via `rgb(var(--color-bg) / <alpha-value>)` syntax in [tailwind.config.js:6-13](tailwind.config.js#L6-L13). Accent is fixed at `#6366f1` (indigo).
+Tokens live in `:root` (dark theme — Gray 100) and `html.light` (light theme — White) blocks. Color tokens are space-separated RGB triplets so Tailwind's `rgb(var(--token) / <alpha-value>)` pattern resolves alpha utilities.
 
-### 13.2 Component primitives (in `src/index.css` @layer components)
+- **Carbon-canonical names** use the `--cds-*` prefix (Carbon Design System): `--cds-background`, `--cds-layer-01`, `--cds-text-primary`, `--cds-interactive`, `--cds-support-error`, etc. These are the Phase 2/3 migration targets.
+- **Legacy aliases** (`--color-bg`, `--color-surface`, `--color-text-primary`, `--color-text-muted`, `--color-border`) are retained but resolve transitively to the Carbon tokens (`--color-bg: var(--cds-background)`). Existing components consuming `bg-bg`, `text-text-primary` etc. through Tailwind utilities pick up the Carbon palette unchanged.
+- **SLA gradient** (`--cds-sla-healthy/-mid/-high/-breached`) is a Phobos-specific 4-step Carbon translation. The "high" step uses `#ff832b` (Carbon Orange 70 from the DataViz palette) — Carbon core doesn't ship a 60-grade orange. See PHASE_1_TOKEN_MAP §3 #1.
+- **Categorical chart palette** (`--chart-01` through `--chart-08`) is theme-asymmetric — Carbon publishes separate light/dark recommended palettes for DataViz so colors stay readable on both Gray 100 and White backgrounds. recharts consumers will be routed through these in Phase 2/3.
 
-- `.input` — full-width form input with rounded border, focus ring.
-- `.btn-primary` — accent background, rounded.
-- `.btn-secondary` — border-only, hover tint.
+### 13.2 Tailwind theme ([tailwind.config.js](tailwind.config.js))
 
-### 13.3 Shared page components
+`theme.extend` exposes:
 
-- `<SectionCard>` — rounded surface with title, optional `headerRight` slot, `drilldown`/`done` border colors, `slim` padding variant.
-- `<SortTh>` — header cell with active sort indicator (`ChevronUp`/`Down`).
-- `<FilterPicker>` — include/exclude (click vs right-click) multi-select popover with search.
-- `<ConfigSection>` (Settings) — icon + title + description + body, unified look for each modal section.
-- `<KpiTile>` (Request Volume Summary) — compact KPI box.
+- **Color utilities**: legacy `bg/surface/accent/text-primary/text-muted/border` plus the full `cds-*` set (`bg-cds-layer-01`, `text-cds-text-secondary`, `border-cds-border-subtle`, `bg-cds-interactive/40`, etc.).
+- **Font families**: `font-sans` (`IBM Plex Sans, Helvetica Neue, Arial, sans-serif`), `font-mono` (`IBM Plex Mono, Menlo, Courier, monospace`).
+- **Carbon type scale** named font sizes: `text-caption` (12px / 0.32px tracking / 400), `text-body-short` (14px / 0.16px / 400), `text-body` (16px / 400), `text-heading-{01,02,03}`, `text-display-{01,02}`. Tailwind defaults (`text-xs/sm/base/lg/xl`) remain available for unmigrated consumers — they will be replaced in Phase 2 where the Carbon spec calls for explicit roles.
+- **Spacing tokens** on the Carbon 8px grid: `p-01` (2px) through `p-10` (64px). Tailwind's standard scale (`p-3`, `gap-4`) remains intact alongside.
+- **Radii**: `rounded-01` (2px), `rounded-tag` (24px — pill exception per §17), `rounded-full` (50%). **0px is the Carbon default identity** — Tailwind's `rounded-sm/md/lg` defaults are intentionally retained for Phase 1 to avoid mid-migration breakage; Phase 2/3 will bulk-rewrite class lists to `rounded-none`.
+- **Shadows**: `shadow-floating` and `shadow-overlay` only (`0 2px 6px rgba(0,0,0,0.3)`). Carbon is shadow-averse — cards/tiles/sections take **no shadow**; depth comes from background-color layering (Layer-01 / Layer-02). Existing shadow utilities on cards will be stripped in Phase 2.
 
-### 13.4 Typography
+### 13.3 Typography rules
 
-Single font: **Inter** (loaded from Google Fonts in [index.html:8-10](index.html#L8-L10)). Typical text sizes: `text-[10px]` for uppercase micro labels, `text-[11px]` for muted metadata, `text-xs` for body, `text-sm` for headers.
+- **IBM Plex Sans** (display + body) and **IBM Plex Mono** (code, technical labels) loaded from Google Fonts CDN in [index.html](index.html).
+- **Three weights only**: 300 (Light, used at display sizes ≥42px for Carbon's signature airy display tone), 400 (body), 600 (emphasis). **No weight 700.** `font-bold` usages migrate to `font-semibold` in Phase 2.
+- **Letter-spacing only at small sizes**: 0.16px at 14px, 0.32px at 12px. Display sizes have zero tracking.
+- **Productive vs expressive line-heights**: 1.29 for compact 14px UI, 1.5 for 16px reading text, 1.17 for 60/48px display.
 
-### 13.5 Colors semantic meaning
+### 13.4 Layout rules
 
-| Color | Meaning |
-|---|---|
-| accent (indigo #6366f1) | Interactive / primary |
-| emerald-400/500 | Done / healthy / success / closed |
-| blue-400 | Open / neutral-active |
-| amber-400 | Warning / waiting / on-hold-ish / amber SLA |
-| orange-400/500 | Elevated warning / SLA 75-100 / on-hold |
-| red-400/500 | Overdue / SLA breached / danger |
-| cyan-400 | Dates group / business metric |
-| purple-300, indigo-300 | Process / MC / Request chips |
-| text-muted / text-muted/25-60 | Secondary / tertiary text |
+- **0px radii by default** on buttons, inputs, cards, tiles. Tags (24px pill) are the only exception, and only inside §17 contexts.
+- **Bottom-border inputs, not boxed.** Inputs sit on a Layer-01 background with a 2px transparent bottom-border that becomes Gray 100 (light) / Gray 10 (dark) when active and Blue 60 / Blue 40 when focused. (Phase 2 migration target — current `.input` primitive is still boxed.)
+- **48px primary button height** with asymmetric padding (`14px 63px 14px 15px`) for trailing-icon accommodation. Compact 40px and expressive 64px variants exist. (Phase 2 migration target.)
+- **Background-color layered depth**: White → Layer-01 (Gray 10) → Layer-02 (Gray 20) on light; Gray 100 → Gray 90 → Gray 80 on dark. Shadows are reserved exclusively for floating elements (dropdowns, tooltips, modals). When a shadow renders, the element genuinely overlaps content.
+- **8px spacing grid** for all layout values. Standard Tailwind utilities (`p-2 = 8px`, `p-4 = 16px`) already align; the Carbon `p-03 / p-05 / p-06` named tokens are available for new code.
+
+### 13.5 Color semantics
+
+| Carbon token | Light value | Dark value | Use |
+|---|---|---|---|
+| `--cds-interactive` | Blue 60 `#0f62fe` | Blue 40 `#78a9ff` | Primary CTA, links, active indicators. The single accent color — no other chromatic hue belongs in chrome. |
+| `--cds-support-success` | Green 50 `#24a148` | Green 40 `#42be65` | Done, healthy, closed states. |
+| `--cds-support-warning` | Yellow 30 `#f1c21b` | Yellow 30 (uniform) | Warning, on-hold-ish, mid-SLA. |
+| `--cds-support-error` | Red 60 `#da1e28` | Red 50 `#fa4d56` | Error, overdue, SLA breached, danger. |
+| `--cds-support-info` | Blue 60 | Blue 40 | Informational (mirrors interactive). |
+| `--cds-sla-healthy / -mid / -high / -breached` | Green 50 → Yellow 30 → `#ff832b` → Red 60 | Green 40 → Yellow 30 → `#ff832b` → Red 50 | 4-step gradient for SLA-aware coloring (Pass tracking, deadlines). |
+| `--cds-text-primary` | Gray 100 `#161616` | Gray 10 `#f4f4f4` | Headings, body, highest-emphasis text (16:1 contrast on bg). |
+| `--cds-text-secondary` | Gray 70 `#525252` | Gray 30 `#c6c6c6` | Secondary metadata, descriptions (~7-10:1 contrast). |
+| `--cds-text-helper` / `-disabled` | Gray 60 / Gray 50 | Gray 50 / Gray 60 | Form helper text, disabled states. |
+
+Phobos-specific badge conventions (MC chip, Process/Work type chip, status chips) keep their existing color semantics — only the underlying palette swap from Tailwind's accent colors to Carbon's took effect in Phase 1.
+
+### 13.6 Shared page components (Phase 2 migration targets)
+
+Existing primitives in [src/pages/BoardPage.jsx](src/pages/BoardPage.jsx) and [src/index.css](src/index.css) `@layer components` were intentionally **not** rewritten in Phase 1. They render with the new Carbon palette and IBM Plex font but retain their pre-Carbon structure (rounded buttons, fully-bordered inputs, etc.). Phase 2 component primitive rewrite covers:
+
+- `.input` / `.btn-primary` / `.btn-secondary` — Phase 2 rewrites for bottom-border inputs, 0px radii, 48px height, asymmetric padding, Blue focus ring.
+- `<SectionCard>` — strip shadow, switch to background-layered depth.
+- `<SortTh>` — type tokens (`text-body-short`).
+- `<FilterPicker>` — Carbon dropdown with floating shadow.
+- `<ConfigSection>` (Settings), `<KpiTile>` (Request Volume) — Layer-01 background, no shadow.
+
+### 13.7 Phase 1 visual reality (mid-migration state)
+
+Until Phase 2 component rewrite ships, the app is "half-Carbon": the palette and font ARE Carbon, but shapes (rounded corners, button heights, input borders, weight 500 usages) still reflect the prior system. This is the directive's expected and intentional intermediate state. See [docs/PHASE_1_TOKEN_MAP.md](docs/PHASE_1_TOKEN_MAP.md) §2 for the full list of utility classes pending Phase 2/3 migration.
 
 ---
 

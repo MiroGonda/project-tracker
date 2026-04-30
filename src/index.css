@@ -2,36 +2,252 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── Theme tokens ─────────────────────────────────────────────────── */
+/* ─── Carbon Design System tokens ─────────────────────────────────────────────
+   Phase 1 token system. Values originate from IBM Carbon (see
+   docs/design/DESIGN-ibm.md). Color tokens are space-separated RGB triplets so
+   Tailwind's rgb(var(--token) / alpha) pattern resolves correctly for the
+   bg-cds- and bg-cds- with alpha modifier utilities.
+
+   Legacy --color- aliases at the bottom of each block reference the new
+   Carbon tokens. Existing components continue to consume bg-bg,
+   text-text-primary, etc.; the visual result is now the Carbon palette.
+   Phase 2 component migration will replace those utility names with the
+   Carbon-canonical ones above.
+
+   See docs/PHASE_1_TOKEN_MAP.md for the full mapping rationale.
+   ─────────────────────────────────────────────────────────────────────────── */
+
 :root {
-  --color-bg:           15 15 15;
-  --color-surface:      28 28 30;
-  --color-text-primary: 232 232 232;
-  --color-text-muted:   107 114 128;
-  --color-border:       42 42 46;
+  /* === Dark theme (Carbon Gray 100) — default === */
+
+  /* Surfaces */
+  --cds-background:         22 22 22;     /* Gray 100  #161616 */
+  --cds-layer-01:           38 38 38;     /* Gray 90   #262626 */
+  --cds-layer-02:           57 57 57;     /* Gray 80   #393939 */
+  --cds-layer-selected:     82 82 82;     /* Gray 70   #525252 */
+  --cds-layer-hover:        57 57 57;     /* Gray 80 — Layer-01 hover    */
+
+  /* Borders */
+  --cds-border-subtle:      57 57 57;     /* Gray 80   */
+  --cds-border-strong:      198 198 198;  /* Gray 30   */
+
+  /* Text */
+  --cds-text-primary:       244 244 244;  /* Gray 10   #f4f4f4 (16:1 on bg) */
+  --cds-text-secondary:     198 198 198;  /* Gray 30   #c6c6c6 (~10.5:1)   */
+  --cds-text-helper:        141 141 141;  /* Gray 50   */
+  --cds-text-disabled:      111 111 111;  /* Gray 60   */
+  --cds-text-on-color:      255 255 255;  /* white     */
+
+  /* Interactive (Blue 40 family — lighter than Blue 60 for dark-bg contrast) */
+  --cds-interactive:        120 169 255;  /* Blue 40   #78a9ff */
+  --cds-interactive-hover:  166 200 255;  /* Blue 30   #a6c8ff */
+  --cds-interactive-active: 208 226 255;  /* Blue 20   #d0e2ff */
+  --cds-link-primary:       120 169 255;  /* Blue 40   */
+  --cds-link-primary-hover: 166 200 255;  /* Blue 30   */
+  --cds-focus:              255 255 255;  /* white focus ring on dark per Carbon */
+  --cds-focus-inset:        22 22 22;     /* Gray 100 inset */
+
+  /* Semantic */
+  --cds-support-error:      250 77 86;    /* Red 50    #fa4d56 */
+  --cds-support-success:    66 190 101;   /* Green 40  #42be65 */
+  --cds-support-warning:    241 194 27;   /* Yellow 30 #f1c21b */
+  --cds-support-info:       120 169 255;  /* Blue 40   */
+
+  /* SLA gradient — 4 steps, Phobos-specific Carbon translation */
+  --cds-sla-healthy:        66 190 101;   /* Green 40 */
+  --cds-sla-mid:            241 194 27;   /* Yellow 30 */
+  --cds-sla-high:           255 131 43;   /* Orange #ff832b — see token map */
+  --cds-sla-breached:       250 77 86;    /* Red 50  */
+
+  /* Categorical chart palette (Carbon DataViz "5-color" expanded to 8) */
+  --chart-01: #8a3ffc; /* Purple 60 */
+  --chart-02: #33b1ff; /* Cyan 40   */
+  --chart-03: #007d79; /* Teal 60   */
+  --chart-04: #ff7eb6; /* Magenta 40 */
+  --chart-05: #fa4d56; /* Red 50    */
+  --chart-06: #6fdc8c; /* Green 30  */
+  --chart-07: #4589ff; /* Blue 50   */
+  --chart-08: #d4bbff; /* Purple 30 */
+
+  /* Typography — IBM Plex Sans / Mono */
+  --font-sans: 'IBM Plex Sans', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'IBM Plex Mono', Menlo, Courier, monospace;
+
+  /* Type scale (size / weight / line-height / letter-spacing).
+     Carbon uses 300 (Light) at display sizes, 400 body, 600 emphasis.
+     Tracking only at 14px (0.16px) and 12px (0.32px). No weight 700. */
+  --type-display-01-size:      3.75rem;  /* 60px */
+  --type-display-01-weight:    300;
+  --type-display-01-lh:        1.17;
+  --type-display-01-track:     0;
+
+  --type-display-02-size:      3rem;     /* 48px */
+  --type-display-02-weight:    300;
+  --type-display-02-lh:        1.17;
+  --type-display-02-track:     0;
+
+  --type-heading-01-size:      2.625rem; /* 42px */
+  --type-heading-01-weight:    300;
+  --type-heading-01-lh:        1.19;
+  --type-heading-01-track:     0;
+
+  --type-heading-02-size:      2rem;     /* 32px */
+  --type-heading-02-weight:    400;
+  --type-heading-02-lh:        1.25;
+  --type-heading-02-track:     0;
+
+  --type-heading-03-size:      1.5rem;   /* 24px */
+  --type-heading-03-weight:    400;
+  --type-heading-03-lh:        1.33;
+  --type-heading-03-track:     0;
+
+  --type-body-01-size:         1rem;     /* 16px */
+  --type-body-01-weight:       400;
+  --type-body-01-lh:           1.5;
+  --type-body-01-track:        0;
+
+  --type-body-emphasis-size:   1rem;
+  --type-body-emphasis-weight: 600;
+  --type-body-emphasis-lh:     1.5;
+  --type-body-emphasis-track:  0;
+
+  --type-body-short-01-size:   0.875rem; /* 14px */
+  --type-body-short-01-weight: 400;
+  --type-body-short-01-lh:     1.29;
+  --type-body-short-01-track:  0.16px;
+
+  --type-body-short-02-size:   0.875rem;
+  --type-body-short-02-weight: 600;
+  --type-body-short-02-lh:     1.29;
+  --type-body-short-02-track:  0.16px;
+
+  --type-caption-size:         0.75rem;  /* 12px */
+  --type-caption-weight:       400;
+  --type-caption-lh:           1.33;
+  --type-caption-track:        0.32px;
+
+  --type-code-size:            0.875rem;
+  --type-code-weight:          400;
+  --type-code-lh:              1.43;
+  --type-code-track:           0.16px;
+
+  /* Spacing (Carbon 8px grid) */
+  --spacing-01: 0.125rem; /* 2px  */
+  --spacing-02: 0.25rem;  /* 4px  */
+  --spacing-03: 0.5rem;   /* 8px  */
+  --spacing-04: 0.75rem;  /* 12px */
+  --spacing-05: 1rem;     /* 16px */
+  --spacing-06: 1.5rem;   /* 24px */
+  --spacing-07: 2rem;     /* 32px */
+  --spacing-08: 2.5rem;   /* 40px */
+  --spacing-09: 3rem;     /* 48px */
+  --spacing-10: 4rem;     /* 64px */
+
+  /* Radii — 0px default, 24px tag exception, 50% circles */
+  --radius-00:     0;
+  --radius-01:     2px;
+  --radius-tag:    24px;
+  --radius-circle: 50%;
+
+  /* Shadows — reserved for floating elements only */
+  --shadow-00:       none;
+  --shadow-floating: 0 2px 6px rgba(0, 0, 0, 0.3);
+  --shadow-overlay:  0 2px 6px rgba(0, 0, 0, 0.3);
+  --shadow-focus:    inset 0 0 0 2px rgb(var(--cds-focus)),
+                     inset 0 0 0 3px rgb(var(--cds-focus-inset));
+
+  /* ─── Legacy aliases ─────────────────────────────────────────────────────
+     Existing components consume these names through Tailwind utilities like
+     `bg-bg`, `text-text-primary`, `border-border`. Phase 2 component migration
+     will rewrite consumers to use the `--cds-*` tokens directly. */
+  --color-bg:            var(--cds-background);
+  --color-surface:       var(--cds-layer-01);
+  --color-text-primary:  var(--cds-text-primary);
+  --color-text-muted:    var(--cds-text-secondary);
+  --color-border:        var(--cds-border-subtle);
 }
 
 html.light {
-  --color-bg:           245 245 247;
-  --color-surface:      255 255 255;
-  --color-text-primary: 17 19 24;
-  --color-text-muted:   107 114 128;
-  --color-border:       228 228 231;
+  /* === Light theme (Carbon White) === */
+
+  /* Surfaces */
+  --cds-background:         255 255 255; /* White                */
+  --cds-layer-01:           244 244 244; /* Gray 10  #f4f4f4     */
+  --cds-layer-02:           224 224 224; /* Gray 20  #e0e0e0     */
+  --cds-layer-selected:     198 198 198; /* Gray 30              */
+  --cds-layer-hover:        232 232 232; /* Gray 10 hover #e8e8e8 */
+
+  /* Borders */
+  --cds-border-subtle:      198 198 198; /* Gray 30  */
+  --cds-border-strong:      141 141 141; /* Gray 50  */
+
+  /* Text */
+  --cds-text-primary:       22 22 22;    /* Gray 100 (16:1 on white)  */
+  --cds-text-secondary:     82 82 82;    /* Gray 70  (~7.8:1)          */
+  --cds-text-helper:        111 111 111; /* Gray 60  */
+  --cds-text-disabled:      141 141 141; /* Gray 50  */
+  --cds-text-on-color:      255 255 255;
+
+  /* Interactive (Blue 60 family) */
+  --cds-interactive:        15 98 254;   /* Blue 60  #0f62fe */
+  --cds-interactive-hover:  0 67 206;    /* Blue 70  #0043ce */
+  --cds-interactive-active: 0 45 156;    /* Blue 80  #002d9c */
+  --cds-link-primary:       15 98 254;
+  --cds-link-primary-hover: 0 67 206;
+  --cds-focus:              15 98 254;
+  --cds-focus-inset:        255 255 255;
+
+  /* Semantic */
+  --cds-support-error:      218 30 40;   /* Red 60   #da1e28 */
+  --cds-support-success:    36 161 72;   /* Green 50 #24a148 */
+  --cds-support-warning:    241 194 27;  /* Yellow 30 (uniform across themes) */
+  --cds-support-info:       15 98 254;
+
+  /* SLA */
+  --cds-sla-healthy:        36 161 72;
+  --cds-sla-mid:            241 194 27;
+  --cds-sla-high:           255 131 43;
+  --cds-sla-breached:       218 30 40;
+
+  /* Categorical chart palette — Carbon "5-color" set, expanded to 8 for light */
+  --chart-01: #6929c4; /* Purple 70 */
+  --chart-02: #1192e8; /* Cyan 50   */
+  --chart-03: #005d5d; /* Teal 70   */
+  --chart-04: #9f1853; /* Magenta 70 */
+  --chart-05: #fa4d56; /* Red 50    */
+  --chart-06: #198038; /* Green 60  */
+  --chart-07: #002d9c; /* Blue 80   */
+  --chart-08: #b28600; /* Yellow 60 */
 }
 
 body {
   background-color: rgb(var(--color-bg));
-  color: rgb(var(--color-text-primary));
-  font-family: 'Inter', sans-serif;
-  margin: 0;
+  color:            rgb(var(--color-text-primary));
+  font-family:      var(--font-sans);
+  margin:           0;
+  -webkit-font-smoothing: antialiased;
 }
 
-html.light .bg-white\/5               { background-color: rgba(0,0,0,0.04); }
-html.light .bg-white\/10              { background-color: rgba(0,0,0,0.06); }
-html.light .hover\:bg-white\/5:hover  { background-color: rgba(0,0,0,0.04); }
+code, pre, kbd, samp {
+  font-family: var(--font-mono);
+}
+
+/* Light-theme bg-white/N translation overrides — preserved from prior phase.
+   Carbon-native cards layer through background-color (white → Gray 10 → Gray 20)
+   rather than alpha overlays; Phase 2 will rewrite usage to token-based surfaces
+   and these legacy overrides can be retired then. */
+html.light .bg-white\/5               { background-color: rgba(0, 0, 0, 0.04); }
+html.light .bg-white\/10              { background-color: rgba(0, 0, 0, 0.06); }
+html.light .hover\:bg-white\/5:hover  { background-color: rgba(0, 0, 0, 0.04); }
 
 * { box-sizing: border-box; }
 
+/* ─── Component primitives — held verbatim for Phase 2 rewrite ────────────────
+   These will be rewritten in Phase 2 to apply Carbon's bottom-border inputs,
+   0px radii, 48px primary button height, asymmetric padding, and Blue 60
+   focus ring. Holding them here unchanged so existing call sites preserve
+   their current shape until Phase 2 migrates them. The visual swap to the
+   Carbon palette (font + colors) is what Phase 1 ships. */
 @layer components {
   .input {
     @apply w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text-primary
