@@ -77,13 +77,23 @@ export default {
         '10': '4rem',     // 64px
       },
       borderRadius: {
-        // Carbon: 0px is the default identity. Existing rounded-sm/md/lg/etc.
-        // utilities are intentionally retained from Tailwind defaults so
-        // current components keep their shape through Phase 1; Phase 2/3 will
-        // migrate consumers to `rounded-none` (or remove the class) per spec.
-        '01':  '2px',
-        tag:   '24px',  // pill exception per CLAUDE.md §17 contexts
-        full:  '50%',   // avatar / icon circles
+        // Phase 2 — Carbon adoption is total: every default rounded-* utility
+        // resolves to 0px. Bulk override so existing rounded-sm/md/lg/xl/etc.
+        // usages migrate in a single shot without per-file JSX edits.
+        DEFAULT: '0px',
+        none:    '0px',
+        sm:      '0px',
+        md:      '0px',
+        lg:      '0px',
+        xl:      '0px',
+        '2xl':   '0px',
+        '3xl':   '0px',
+        // 'full' intentionally NOT overridden — Tailwind's default 9999px is
+        // the correct pill/circle behavior (caps at min(w,h)/2). Setting it to
+        // 50% would turn rectangular pill chips into ellipses. Use Tailwind's
+        // rounded-full for both circles and pill-shaped chips.
+        '01':    '2px',
+        tag:     '24px',  // explicit Carbon pill — §17 contexts (Phase 2/3 migration target)
       },
       boxShadow: {
         // Carbon is shadow-averse — only floating overlays use elevation shadows.

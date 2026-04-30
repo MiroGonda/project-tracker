@@ -242,23 +242,139 @@ html.light .hover\:bg-white\/5:hover  { background-color: rgba(0, 0, 0, 0.04); }
 
 * { box-sizing: border-box; }
 
-/* ─── Component primitives — held verbatim for Phase 2 rewrite ────────────────
-   These will be rewritten in Phase 2 to apply Carbon's bottom-border inputs,
-   0px radii, 48px primary button height, asymmetric padding, and Blue 60
-   focus ring. Holding them here unchanged so existing call sites preserve
-   their current shape until Phase 2 migrates them. The visual swap to the
-   Carbon palette (font + colors) is what Phase 1 ships. */
+/* ─── Component primitives (Phase 2 — Carbon-aligned) ────────────────────────
+   Buttons follow Carbon's 48px default with asymmetric padding (14px 63px 14px
+   15px) — the trailing-icon reservation that defines Carbon's button identity.
+   Inputs are bottom-border-only on a Layer-01 fill (the most visually dramatic
+   shape change of the redesign). All primitives ship 0px radii via the
+   Tailwind override. .btn-sm (40px compact) and .btn-lg (64px expressive) are
+   size modifiers that compose with any color variant.
+   ─────────────────────────────────────────────────────────────────────────── */
 @layer components {
-  .input {
-    @apply w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text-primary
-           placeholder:text-text-muted/50 focus:outline-none focus:border-accent/60 transition-colors;
+
+  /* ── Buttons — shared chrome ────────────────────────────────────────────── */
+  .btn-primary,
+  .btn-secondary,
+  .btn-ghost,
+  .btn-destructive {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    height: 48px;
+    padding: 14px 63px 14px 15px;
+    font-family: var(--font-sans);
+    font-size: 0.875rem;             /* 14px — body-short */
+    font-weight: 400;
+    letter-spacing: 0.16px;
+    line-height: 1.29;
+    border: 1px solid transparent;
+    border-radius: 0;
+    cursor: pointer;
+    transition: background-color 110ms cubic-bezier(0.2, 0, 1, 0.9),
+                color           110ms cubic-bezier(0.2, 0, 1, 0.9),
+                border-color    110ms cubic-bezier(0.2, 0, 1, 0.9);
   }
+  .btn-primary:focus-visible,
+  .btn-secondary:focus-visible,
+  .btn-ghost:focus-visible,
+  .btn-destructive:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px rgb(var(--cds-focus)),
+                inset 0 0 0 3px rgb(var(--cds-focus-inset));
+  }
+  .btn-primary:disabled,
+  .btn-secondary:disabled,
+  .btn-ghost:disabled,
+  .btn-destructive:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  /* Primary — Carbon Blue 60 (light) / Blue 40 (dark) */
   .btn-primary {
-    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-white
-           text-sm font-medium hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors;
+    background-color: rgb(var(--cds-interactive));
+    color:            rgb(var(--cds-text-on-color));
   }
+  .btn-primary:hover:not(:disabled)  { background-color: rgb(var(--cds-interactive-hover)); }
+  .btn-primary:active:not(:disabled) { background-color: rgb(var(--cds-interactive-active)); }
+
+  /* Secondary — Layer-02 surface, theme-aware. See PHASE_2_NOTES for the
+     Carbon-strict-vs-theme-aware judgment call. */
   .btn-secondary {
-    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border
-           text-sm font-medium text-text-muted hover:text-text-primary hover:bg-white/5 transition-colors;
+    background-color: rgb(var(--cds-layer-02));
+    color:            rgb(var(--cds-text-primary));
+  }
+  .btn-secondary:hover:not(:disabled)  { background-color: rgb(var(--cds-layer-selected)); }
+  .btn-secondary:active:not(:disabled) { background-color: rgb(var(--cds-border-strong)); }
+
+  /* Ghost — transparent, link-colored text. Tighter padding (no trailing-icon
+     reservation, since ghost buttons are usually inline with other controls). */
+  .btn-ghost {
+    background-color: transparent;
+    color:            rgb(var(--cds-link-primary));
+    padding:          14px 16px;
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background-color: rgb(var(--cds-layer-hover));
+    color:            rgb(var(--cds-link-primary-hover));
+  }
+
+  /* Destructive — Red 60 (light) / Red 50 (dark). Deletion confirmations only. */
+  .btn-destructive {
+    background-color: rgb(var(--cds-support-error));
+    color:            rgb(var(--cds-text-on-color));
+  }
+  .btn-destructive:hover:not(:disabled)  { background-color: rgb(var(--cds-support-error) / 0.85); }
+  .btn-destructive:active:not(:disabled) { background-color: rgb(var(--cds-support-error) / 0.75); }
+
+  /* Size modifiers — compose with any color variant. */
+  .btn-sm { height: 40px; padding: 10px 60px 10px 12px; }
+  .btn-lg { height: 64px; padding: 22px 64px 22px 16px; }
+  .btn-ghost.btn-sm { padding: 10px 12px; }
+  .btn-ghost.btn-lg { padding: 22px 16px; }
+
+  /* ── Input — Carbon bottom-border field ─────────────────────────────────── */
+  .input {
+    display: block;
+    width: 100%;
+    height: 40px;
+    padding: 0 16px;
+    background-color: rgb(var(--cds-layer-01));
+    color:            rgb(var(--cds-text-primary));
+    font-family: var(--font-sans);
+    font-size: 1rem;                 /* 16px — body-01 */
+    font-weight: 400;
+    line-height: 1.5;
+    border: none;
+    /* 2px transparent default → 2px solid focus eliminates the focus jitter
+       (no height shift since the border reservation is constant). */
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    outline: none;
+    transition: background-color 110ms ease, border-color 110ms ease;
+  }
+  .input::placeholder         { color: rgb(var(--cds-text-helper)); }
+  .input:hover:not(:disabled) { background-color: rgb(var(--cds-layer-hover)); }
+  .input:focus                { border-bottom: 2px solid rgb(var(--cds-focus)); }
+  .input:disabled {
+    background-color: rgb(var(--cds-layer-01) / 0.5);
+    color:            rgb(var(--cds-text-disabled));
+    cursor: not-allowed;
+  }
+  .input.input-error,
+  .input[aria-invalid="true"] {
+    border-bottom: 2px solid rgb(var(--cds-support-error));
+  }
+
+  /* Floating label above an input — 12px caption with 0.32px tracking. */
+  .input-label {
+    display: block;
+    margin-bottom: 4px;
+    font-family: var(--font-sans);
+    font-size: 0.75rem;              /* 12px — caption */
+    font-weight: 400;
+    letter-spacing: 0.32px;
+    line-height: 1.33;
+    color: rgb(var(--cds-text-secondary));
   }
 }
