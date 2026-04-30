@@ -37,8 +37,8 @@ Working order (locked):
 | 0e Item 1 | LANE_MAP diagnostic + typo fix | **Complete — committed + pushed** |
 | 0e Item 2 | Retention cap normalization fix | **Closed as no-op (2026-04-30) — diagnostic confirmed all four target boards already capped at 1000; current `applyDoneCardsCap` is correctly applied on full doneCards array on every write in both `syncManualBoard` and `syncAresBoard`. Stale 1468/1500 numbers were from before Phase 0d Task 4's redeploy. Diagnostic script `functions/scripts/diagnose-cache-sizes.js` retained.** |
 | 0e Item 5 | ArYIZvEC stale Trello shortLink investigation | **Closed as no-op (2026-04-30) — shortLink not stale. Trello `/boards/ArYIZvEC` returns 200 (board live, `closed: false`); manual cache healthy (`lastSyncStatus: success`, 13 active / 343 done). Day 1 404 was the expected GitHub Pages SPA-fallback (CLAUDE.md §2), not a board issue. Cosmetic name drift between config (`Sunlife: EDM - Campaigns Q2 2026`) and Trello (`Sunlife: EDM Campaigns (2026)`) flagged to Driver for optional Admin UI alignment. Diagnostic script `functions/scripts/diagnose-stale-shortlink.js` retained.** |
-| **0e Item 3** | **listBoards call deduplication** | **Active — next** |
-| 1 | Carbon token system rewrite + IBM Plex font load | Queued (handoff drafted at Phase 0e close) |
+| 0e Item 3 | listBoards call deduplication | **Complete (2026-04-30) — committed `3a7a2f8`. listBoards hoisted into AccessContext as `apiBoards`/`apiBoardsLoading`/`apiBoardsError`/`refreshApiBoards`; in-flight Promise dedup; Sidebar + Settings consume from context, Admin's button calls `refreshApiBoards(true)`. Phase 0c retry+cache on phobos.js retained as defense-in-depth.** |
+| **1** | **Carbon token system rewrite + IBM Plex font load** | **Active — next (handoff drafted at Phase 0e close)** |
 | 2 | Component primitives (Carbon-aligned) | Not started |
 | 3 | Page-layer migration | Not started |
 | 4 | Micro-interactions + theme toggle polish | Not started |
@@ -133,9 +133,18 @@ Read-only diagnostic on 2026-04-30 via `functions/scripts/diagnose-stale-shortli
 
 **Cosmetic note for Driver:** config name `"Sunlife: EDM - Campaigns Q2 2026"` and Trello's canonical `"Sunlife: EDM Campaigns (2026)"` differ. Optional Admin-UI alignment.
 
-### 6.4 Item 3 — listBoards call deduplication
+### 6.4 Item 3 — listBoards call deduplication ✅ (committed `3a7a2f8`)
 
-Hoist `listBoards` into `AccessContext` per the Item 3 handoff prompt. Phase 0c retry+cache on `phobos.js` stays as defense-in-depth.
+`listBoards` hoisted into `AccessContext`:
+
+- New context state: `apiBoards`, `apiBoardsLoading`, `apiBoardsError`, `refreshApiBoards(force = false)`.
+- Single auto-fetch fires once when `configReady` flips true (after creds are seeded).
+- In-flight Promise dedup via `apiBoardsInflight` ref — concurrent non-force callers receive the same Promise.
+- Force=true (Admin's "Load Ares boards" button) bypasses the in-flight share and the phobos.js localStorage cache.
+- `Sidebar` and `Settings` no longer fire their own `listBoards` effects; they consume `apiBoards` directly from context.
+- `Admin`'s `loadAresBoards` calls `refreshApiBoards(true)`; local `boardsLoading`/`boardsError` retained for button-specific UI feedback.
+
+Phase 0c retry+cache on `phobos.js` retained unchanged as defense-in-depth.
 
 ### 6.5 Out of scope for Phase 0e
 
